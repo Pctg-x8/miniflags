@@ -1,0 +1,16 @@
+[
+	{
+	  "modid": "miniflags",
+	  "name": "MiniFlags",
+	  "description": "Measurement, Objective marking with Miniature of Flags!",
+	  "version": "1.0-alpha",
+	  "mcversion": "1.7.10",
+	  "url": "http://cterm2.s601.xrea.com/",
+	  "updateUrl": "http://github.com/Pctg-x8/miniflags",
+	  "authorList": ["S.Percentage"],
+	  "credits": "",
+	  "logoFile": "",
+	  "screenshots": [],
+	  "dependencies": []
+	}
+]
