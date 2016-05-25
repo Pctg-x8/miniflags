@@ -29,15 +29,15 @@ package object flag
 package flag
 {
 	import net.{minecraft => mc}
-	import mc.item.ItemBlockWithMetadata
+	import mc.item.{ItemBlockWithMetadata, Item}
 	import mc.block.{Block, BlockContainer}, mc.block.material.Material
 	import mc.world.World, mc.entity.player.EntityPlayer
 	import mc.tileentity.TileEntity, mc.client.renderer.tileentity.TileEntitySpecialRenderer
-	import mc.util.{AxisAlignedBB, MathHelper}, mc.entity.{Entity, EntityLivingBase}
+	import mc.util._, mc.entity.{Entity, EntityLivingBase}
 	import mc.item.ItemStack
 	import scalaz._, Scalaz._
 	import cpw.mods.fml.client.registry.ISimpleBlockRenderingHandler
-	import mc.init.Blocks
+	import mc.init.Blocks, mc.creativetab.CreativeTabs
 
 	object Parameters
 	{
@@ -51,7 +51,7 @@ package flag
 	class BlockSummoner(block: Block) extends ItemBlockWithMetadata(block, block)
 	{
 		setMaxStackSize(1)
-		
+
 		override def onItemUse(stack: ItemStack, player: EntityPlayer, world: World, x: Int, y: Int, z: Int, side: Int,
 			hitX: Float, hitY: Float, hitZ: Float) =
 		{
@@ -146,6 +146,18 @@ package flag
 				world.markBlockForUpdate(x, y, z)
 			}
 		}
+		override def getDrops(world: World, x: Int, y: Int, z: Int, meta: Int, fortune: Int) =
+		{
+			val items = new java.util.ArrayList[ItemStack]
+			items.add(new ItemStack(Item.getItemFromBlock(Block0), 1, world.getBlockMetadata(x, y, z)))
+			items
+		}
+		override def getPickBlock(target: MovingObjectPosition, world: World, x: Int, y: Int, z: Int, player: EntityPlayer) =
+			new ItemStack(Item.getItemFromBlock(Block0), 1, world.getBlockMetadata(x, y, z))
+		override def getSubBlocks(source: Item, tab: CreativeTabs, list: java.util.List[_])
+		{
+			for(x <- 0 until 16 map (x => new ItemStack(source, 1, x))) list.asInstanceOf[java.util.List[ItemStack]].add(x)
+		}
 	}
 	object Block0 extends AbstractBlock
 	object Block90 extends AbstractBlock
@@ -235,9 +247,9 @@ package flag
 			glRotatef(90.0f, 0.0f, 1.0f, 0.0f)
 			glScalef(1.25f, 1.25f, 1.25f)
 			glTranslatef(-0.5f, -0.5f, -0.5f)
-			meshBase2.renderWithNormals(Blocks.stone, renderer)
-			meshPole2.renderWithNormals(Blocks.planks, renderer)
-			meshdata2.renderWithNormals(Blocks.wool, renderer)
+			meshBase2.renderWithNormals(Blocks.stone, 0, renderer)
+			meshPole2.renderWithNormals(Blocks.planks, 0, renderer)
+			meshdata2.renderWithNormals(Blocks.wool, meta, renderer)
 			glPopMatrix()
 		}
 		override def renderWorldBlock(world: IBlockAccess, x: Int, y: Int, z: Int, block: Block, model: Int, renderer: RenderBlocks) =
@@ -269,8 +281,8 @@ package flag
 			}
 
 			// Render static meshes
-			meshBase.render(world, Blocks.stone, x, y, z, renderer, upLight, xLight, zLight, r, g, b)
-			meshPole.render(world, Blocks.planks, x, y, z, renderer, upLight, xLight, zLight, r, g, b)
+			meshBase.render(world, Blocks.stone, 0, x, y, z, renderer, upLight, xLight, zLight, r, g, b)
+			meshPole.render(world, Blocks.planks, 0, x, y, z, renderer, upLight, xLight, zLight, r, g, b)
 			val mesh = block match
 			{
 				case Block0 => meshdata
@@ -278,7 +290,7 @@ package flag
 				case Block180 => meshdata180
 				case Block270 => meshdata270
 			}
-			mesh.render(world, Blocks.wool, x, y, z, renderer, upLight, xLight, zLight, r, g, b)
+			mesh.render(world, Blocks.wool, world.getBlockMetadata(x, y, z), x, y, z, renderer, upLight, xLight, zLight, r, g, b)
 			true
 		}
 	}
