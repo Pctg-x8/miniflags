@@ -1,6 +1,8 @@
 package com.cterm2.miniflags
 
 import cpw.mods.fml.relauncher._
+import net.minecraft.item.Item
+import net.minecraft.world.World
 
 package object flag
 {
@@ -8,6 +10,7 @@ package object flag
 	import cpw.mods.fml.client.registry.{ClientRegistry, RenderingRegistry}
 
 	var RenderID = 0
+	var itemBlockSummoner: BlockSummoner = null
 
 	def register
 	{
@@ -16,6 +19,8 @@ package object flag
 		ContentRegistry register Block180 as "FlagBlock.180deg"
 		ContentRegistry register Block270 as "FlagBlock.270deg"
 		ContentRegistry register classOf[TileData] as "FlagTileData"
+
+		itemBlockSummoner = Item.getItemFromBlock(Block0).asInstanceOf[BlockSummoner]
 	}
 	@SideOnly(Side.CLIENT)
 	def registerClient
@@ -24,12 +29,18 @@ package object flag
 		RenderID = RenderingRegistry.getNextAvailableRenderId
 		RenderingRegistry.registerBlockHandler(BlockRenderer)
 	}
+
+	def playLinkedSound(world: World, x: Int, y: Int, z: Int)
+	{
+		world.playSoundEffect((x.toFloat + 0.5f).toDouble, (y.toFloat + 0.5f).toDouble, (z.toFloat + 0.5f).toDouble,
+			"random.orb", 0.1f, 0.5f)
+	}
 }
 
 package flag
 {
 	import net.{minecraft => mc}
-	import mc.item.{ItemBlockWithMetadata, Item}
+	import mc.item.ItemBlockWithMetadata
 	import mc.block.{Block, BlockContainer}, mc.block.material.Material
 	import mc.world.World, mc.entity.player.EntityPlayer
 	import mc.tileentity.TileEntity, mc.client.renderer.tileentity.TileEntitySpecialRenderer
@@ -38,6 +49,8 @@ package flag
 	import scalaz._, Scalaz._
 	import cpw.mods.fml.client.registry.ISimpleBlockRenderingHandler
 	import mc.init.Blocks, mc.creativetab.CreativeTabs
+	import mc.nbt.NBTTagCompound
+	import com.cterm2.tetra.ActiveNBTRecord._
 
 	object Parameters
 	{
@@ -95,6 +108,21 @@ package flag
 					{
 						blk.onBlockPlacedBy(world, finalX, finalY, finalZ, player, stack)
 						blk.onPostBlockPlaced(world, finalX, finalY, finalZ, actionResult)
+
+						if(world.isRemote)
+						{
+							// Naming and Linking
+							for(tile <- Option(world.getTileEntity(finalX, finalY, finalZ)) collect { case x: TileData => x })
+							{
+								if(stack.hasDisplayName) tile.name = Some(stack.getDisplayName)
+								(Option(stack.getTagCompound) >>= (x => x[NBTTagCompound]("ReservedLinkingDestinationCoordinate"))) foreach
+								{
+									tag => tile.doReservedLinking(world, tag, player)
+								}
+							}
+							// Sync TileData from Server
+							world.markBlockForUpdate(x, y, z)
+						}
 					}
 
 					world.playSoundEffect((finalX.toFloat + 0.5f).toDouble, (finalY.toFloat + 0.5f).toDouble, (finalZ.toFloat + 0.5f).toDouble,
@@ -106,9 +134,25 @@ package flag
 			else false
 		}
 	}
+	object BlockSummoner
+	{
+		def reserveLinkingDestinationCoordinate(world: World, stack: ItemStack, x: Int, y: Int, z: Int, player: EntityPlayer)
+		{
+			val tagDestCoord = new NBTTagCompound
+			tagDestCoord("x") = x
+			tagDestCoord("y") = y
+			tagDestCoord("z") = z
+
+			val tag = Option(stack.getTagCompound) getOrElse { val v = new NBTTagCompound; stack.setTagCompound(v); v }
+			tag("ReservedLinkingDestinationCoordinate") = tagDestCoord
+			player.addChatComponentMessage(new ChatComponentText(s"Reserved Linking to ($x, $y, $z)"))
+			playLinkedSound(world, x, y, z)
+		}
+	}
 	sealed abstract class AbstractBlock extends BlockContainer(Material.rock)
 	{
-		this.setHardness(1.0f)
+		this.setHardness(0.125f)
+		this.setHarvestLevel(null, 0)
 		this.setBlockBounds(Parameters.Space, 0.0f, Parameters.Space, Parameters.InvSpace, 1.0f, Parameters.InvSpace)
 
 		override val isOpaqueCube = false
@@ -122,34 +166,33 @@ package flag
 		override def addCollisionBoxesToList(world: World, x: Int, y: Int, z: Int, mask: AxisAlignedBB, boxes: java.util.List[_], entity: Entity)
 		{
 			Option(AxisAlignedBB.getBoundingBox(x.toDouble + this.minX, y.toDouble, z.toDouble + this.minZ,
-				x.toDouble + this.maxX, (y + Parameters.BaseHeight).toDouble, z.toDouble + this.maxZ)) match
+				x.toDouble + this.maxX, (y + Parameters.BaseHeight).toDouble, z.toDouble + this.maxZ)) filter (mask intersectsWith _) foreach
 			{
-				case Some(bb) if mask intersectsWith bb => boxes.asInstanceOf[java.util.List[AnyRef]].add(bb)
-				case _ => /* Nothing to do */
+				bb => boxes.asInstanceOf[java.util.List[AxisAlignedBB]].add(bb)
 			}
 		}
 
 		override def createNewTileEntity(world: World, meta: Int) = new TileData
 
-		override def onBlockPlacedBy(world: World, x: Int, y: Int, z: Int, actor: EntityLivingBase, stack: ItemStack)
+		override def onBlockActivated(world: World, x: Int, y: Int, z: Int, player: EntityPlayer, side: Int, hitX: Float, hitY: Float, hitZ: Float) =
 		{
 			if(!world.isRemote)
 			{
-				if(stack.hasDisplayName)
+				val activateWith = Option(player.inventory.getCurrentItem)
+
+				activateWith filter (_.getItem == itemBlockSummoner) foreach
 				{
-					for(x <- Option(world.getTileEntity(x, y, z)) >>= (x => Option(x.asInstanceOf[TileData])))
-					{
-						x.name = Some(stack.getDisplayName)
-					}
+					s => BlockSummoner.reserveLinkingDestinationCoordinate(world, s, x, y, z, player)
 				}
-				// Sync TileData from Server
-				world.markBlockForUpdate(x, y, z)
+				true
 			}
+			else world.isRemote
 		}
+
 		override def getDrops(world: World, x: Int, y: Int, z: Int, meta: Int, fortune: Int) =
 		{
 			val items = new java.util.ArrayList[ItemStack]
-			items.add(new ItemStack(Item.getItemFromBlock(Block0), 1, world.getBlockMetadata(x, y, z)))
+			items.add(new ItemStack(itemBlockSummoner, 1, world.getBlockMetadata(x, y, z)))
 			items
 		}
 		override def getPickBlock(target: MovingObjectPosition, world: World, x: Int, y: Int, z: Int, player: EntityPlayer) =
@@ -166,14 +209,29 @@ package flag
 
 	class TileData extends TileEntity
 	{
-		import mc.nbt.NBTTagCompound
-		import com.cterm2.tetra.ActiveNBTRecord._
 		import mc.network.play.server.S35PacketUpdateTileEntity
 		import mc.network.NetworkManager
 
 		var name: Option[String] = None
+		var linkTo: Option[TileData] = None
+		var linkedFrom = Seq[TileData]()
 
 		def hasCustomName = this.name.isDefined
+		def doReservedLinking(world: World, tag: NBTTagCompound, player: EntityPlayer)
+		{
+			val (x, y, z) = (tag[Int]("x") | 0, tag[Int]("y") | 0, tag[Int]("z") | 0)
+			val destTile = Option(world.getTileEntity(x, y, z)) collect { case x: TileData => x }
+
+			destTile match
+			{
+			case None => player.addChatComponentMessage(new ChatComponentText("Destination not found or removed"))
+			case Some(dt) =>
+				this.linkTo = Some(dt)
+				dt.linkedFrom = dt.linkedFrom :+ this
+				player.addChatComponentMessage(new ChatComponentText(s"Successfully linked from ($xCoord, $yCoord, $zCoord) to ($x, $y, $z)"))
+				playLinkedSound(world, xCoord, yCoord, zCoord)
+			}
+		}
 
 		override def writeToNBT(tag: NBTTagCompound)
 		{
@@ -208,7 +266,6 @@ package flag
 		import mc.world.IBlockAccess
 		import org.lwjgl.opengl.GL11._
 		import com.cterm2.tetra.StaticMeshData._
-		import mc.client.Minecraft
 
 		implicit class MeshConstructorHelper(val mesh: StaticMesh) extends AnyVal
 		{
