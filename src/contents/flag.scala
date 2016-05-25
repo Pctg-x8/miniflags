@@ -230,6 +230,7 @@ package flag
 				dt.linkedFrom = dt.linkedFrom :+ this
 				player.addChatComponentMessage(new ChatComponentText(s"Successfully linked from ($xCoord, $yCoord, $zCoord) to ($x, $y, $z)"))
 				playLinkedSound(world, xCoord, yCoord, zCoord)
+				ModInstance.network.sendToAll(new PacketLinkStateChanged(xCoord, yCoord, zCoord, x, y, z))
 			}
 		}
 

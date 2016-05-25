@@ -1,13 +1,12 @@
 package com.cterm2.miniflags
 
-import cpw.mods.fml.common.network.{NetworkRegistry, ByteBufUtils}
 import cpw.mods.fml.common.network.simpleimpl.{IMessage, IMessageHandler, MessageContext}
 import io.netty.buffer.ByteBuf
 
 final case class PacketLinkStateChanged(
     var xSrc: Int, var ySrc: Int, var zSrc: Int, var xDest: Int, var yDest: Int, var zDest: Int) extends IMessage
 {
-    import ByteBufUtils._
+    import cpw.mods.fml.common.network.ByteBufUtils._
 
     def this() = this(0, 0, 0, 0, 0, 0)
 
@@ -35,6 +34,9 @@ final class LinkStateChangedPacketHandler extends IMessageHandler[PacketLinkStat
 {
     override def onMessage(message: PacketLinkStateChanged, context: MessageContext) =
     {
-        val 
+        WorldRenderer.registerCoordinatePair(message.xSrc, message.ySrc, message.zSrc,
+            message.xDest, message.yDest, message.zDest)
+        ModInstance.logger.info(s"Add link from (${message.xSrc}, ${message.ySrc}, ${message.zSrc}) to (${message.xDest}, ${message.yDest}, ${message.zDest})")
+        null
     }
 }
