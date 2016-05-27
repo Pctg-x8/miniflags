@@ -33,14 +33,14 @@ package object flag
 	def playLinkedSound(world: World, x: Int, y: Int, z: Int)
 	{
 		world.playSoundEffect((x.toFloat + 0.5f).toDouble, (y.toFloat + 0.5f).toDouble, (z.toFloat + 0.5f).toDouble,
-			"random.orb", 0.1f, 0.5f)
+			"random.orb", 0.25f, 0.5f)
 	}
 }
 
 package flag
 {
 	import net.{minecraft => mc}
-	import mc.item.ItemBlockWithMetadata
+	import mc.item.ItemBlock
 	import mc.block.{Block, BlockContainer}, mc.block.material.Material
 	import mc.world.World, mc.entity.player.EntityPlayer
 	import mc.tileentity.TileEntity, mc.client.renderer.tileentity.TileEntitySpecialRenderer
@@ -61,13 +61,17 @@ package flag
 		final val FlagThickness = 0.75f / 16.0f
 	}
 
-	class BlockSummoner(block: Block) extends ItemBlockWithMetadata(block, block)
+	class BlockSummoner(block: Block) extends ItemBlock(block)
 	{
-		setMaxStackSize(1)
+		setMaxStackSize(1).setHasSubtypes(true).setMaxDamage(0)
+
+		override def getIconFromDamage(damage: Int) = block.getIcon(2, damage)
+		override def getMetadata(meta: Int) = meta
 
 		override def onItemUse(stack: ItemStack, player: EntityPlayer, world: World, x: Int, y: Int, z: Int, side: Int,
 			hitX: Float, hitY: Float, hitZ: Float) =
 		{
+			// Block Direction by RotationYaw
 			val blk = (MathHelper.floor_double((player.rotationYaw / 90.0f).toDouble + 0.5d) & 3) match
 			{
 				case 0 => Block0
@@ -102,34 +106,7 @@ package flag
 				val meta = this.getMetadata(stack.getItemDamage)
 				val actionResult = blk.onBlockPlaced(world, finalX, finalY, finalZ, finalSide, hitX, hitY, hitZ, meta)
 
-				if(world.setBlock(finalX, finalY, finalZ, blk, actionResult, 3))
-				{
-					if(world.getBlock(finalX, finalY, finalZ) == blk)
-					{
-						blk.onBlockPlacedBy(world, finalX, finalY, finalZ, player, stack)
-						blk.onPostBlockPlaced(world, finalX, finalY, finalZ, actionResult)
-
-						if(world.isRemote)
-						{
-							// Naming and Linking
-							for(tile <- Option(world.getTileEntity(finalX, finalY, finalZ)) collect { case x: TileData => x })
-							{
-								if(stack.hasDisplayName) tile.name = Some(stack.getDisplayName)
-								(Option(stack.getTagCompound) >>= (x => x[NBTTagCompound]("ReservedLinkingDestinationCoordinate"))) foreach
-								{
-									tag => tile.doReservedLinking(world, tag, player)
-								}
-							}
-							// Sync TileData from Server
-							world.markBlockForUpdate(x, y, z)
-						}
-					}
-
-					world.playSoundEffect((finalX.toFloat + 0.5f).toDouble, (finalY.toFloat + 0.5f).toDouble, (finalZ.toFloat + 0.5f).toDouble,
-						blk.stepSound.func_150496_b(), (blk.stepSound.getVolume + 1.0f) / 2.0f, blk.stepSound.getPitch * 0.8f)
-					stack.stackSize = stack.stackSize - 1
-				}
-				true
+				BlockSummoner.placeBlockAt(world, finalX, finalY, finalZ, blk, actionResult, player, stack)
 			}
 			else false
 		}
@@ -147,6 +124,44 @@ package flag
 			tag("ReservedLinkingDestinationCoordinate") = tagDestCoord
 			player.addChatComponentMessage(new ChatComponentText(s"Reserved Linking to ($x, $y, $z)"))
 			playLinkedSound(world, x, y, z)
+		}
+		def placeBlockAt(world: World, x: Int, y: Int, z: Int, block: Block, meta: Int, player: EntityPlayer, stack: ItemStack) =
+		{
+			val blockPlaceResult = world.setBlock(x, y, z, block, meta, 3)
+			val blockValidation = blockPlaceResult && world.getBlock(x, y, z) == block
+
+			// Successfully placed block in server: Do post action
+			if(blockValidation && !world.isRemote)
+			{
+				val tile = Option(world.getTileEntity(x, y, z))
+
+				// Register Object
+				ObjectManager.instanceForWorld(world) foreach (_.register(x, y, z))
+				// Naming
+				if(stack.hasDisplayName) tile foreach { case x: TileData => x.name = Some(stack.getDisplayName) }
+				// Do reserved linking
+				(Option(stack.getTagCompound) >>= (x => x[NBTTagCompound]("ReservedLinkingDestinationCoordinate")) >>=
+					(tag => (tag[Int]("x") :: tag[Int]("y") :: tag[Int]("z") :: Nil).sequence)) foreach
+				{
+					case List(dx, dy, dz) => tile match
+					{
+						case Some(tile: TileData) => ObjectManager.instanceForWorld(world) foreach (_.link(world, player, x, y, z, dx, dy, dz))
+						case _ => player.addChatComponentMessage(new ChatComponentText("Destination is not found or removed"))
+					}
+					case _ => ModInstance.logger.warn("ReservedLinkingDestinationCoordinate data is broken")
+				}
+
+				// Sync TileData
+				world.markBlockForUpdate(x, y, z)
+			}
+			// Play Sound and decrease stack if placing block has succeeded
+			if(blockPlaceResult)
+			{
+				world.playSoundEffect(x.toDouble + 0.5d, y.toDouble + 0.5d, z.toDouble + 0.5d, block.stepSound.func_150496_b,
+					(block.stepSound.getVolume + 1.0f) / 2.0f, block.stepSound.getPitch * 0.8f)
+				stack.stackSize = stack.stackSize - 1
+			}
+			true
 		}
 	}
 	sealed abstract class AbstractBlock extends BlockContainer(Material.rock)
@@ -173,7 +188,6 @@ package flag
 		}
 
 		override def createNewTileEntity(world: World, meta: Int) = new TileData
-
 		override def onBlockActivated(world: World, x: Int, y: Int, z: Int, player: EntityPlayer, side: Int, hitX: Float, hitY: Float, hitZ: Float) =
 		{
 			if(!world.isRemote)
@@ -187,6 +201,14 @@ package flag
 				true
 			}
 			else world.isRemote
+		}
+		override def breakBlock(world: World, x: Int, y: Int, z: Int, block: Block, meta: Int)
+		{
+			if(!world.isRemote)
+			{
+				ObjectManager.instanceForWorld(world) foreach (_.unregister(x, y, z))
+			}
+			super.breakBlock(world, x, y, z, block, meta)
 		}
 
 		override def getDrops(world: World, x: Int, y: Int, z: Int, meta: Int, fortune: Int) =
@@ -213,25 +235,15 @@ package flag
 		import mc.network.NetworkManager
 
 		var name: Option[String] = None
-		var linkTo: Option[TileData] = None
-		var linkedFrom = Seq[TileData]()
 
 		def hasCustomName = this.name.isDefined
-		def doReservedLinking(world: World, tag: NBTTagCompound, player: EntityPlayer)
+		def onBreak()
 		{
-			val (x, y, z) = (tag[Int]("x") | 0, tag[Int]("y") | 0, tag[Int]("z") | 0)
-			val destTile = Option(world.getTileEntity(x, y, z)) collect { case x: TileData => x }
-
-			destTile match
-			{
-			case None => player.addChatComponentMessage(new ChatComponentText("Destination not found or removed"))
-			case Some(dt) =>
-				this.linkTo = Some(dt)
-				dt.linkedFrom = dt.linkedFrom :+ this
-				player.addChatComponentMessage(new ChatComponentText(s"Successfully linked from ($xCoord, $yCoord, $zCoord) to ($x, $y, $z)"))
-				playLinkedSound(world, xCoord, yCoord, zCoord)
-				ModInstance.network.sendToAll(new PacketLinkStateChanged(xCoord, yCoord, zCoord, x, y, z))
-			}
+			// Unlink from others
+			// this.linkedFrom foreach { x => x.linkTo = None }
+			// this.linkTo foreach { x => x.linkedFrom = x.linkedFrom filter (_ != this) }
+			// Tell breaking terminal to client
+			// if(linkTo.isDefined || !linkedFrom.isEmpty) ModInstance.network.sendToAll(new PacketTerminalBroken(this.xCoord, this.yCoord, this.zCoord))
 		}
 
 		override def writeToNBT(tag: NBTTagCompound)
@@ -254,7 +266,7 @@ package flag
 			}) | null
 		override def onDataPacket(network: NetworkManager, packet: S35PacketUpdateTileEntity)
 		{
-			for(x <- Option(packet) >>= (x => Option(x.func_148857_g())))
+			for(x <- Option(packet) >>= (x => Option(x.func_148857_g)))
 			{
 				this.name = x[String]("CustomName")
 			}

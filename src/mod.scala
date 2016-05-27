@@ -2,9 +2,8 @@ package com.cterm2.miniflags
 
 import org.apache.logging.log4j.LogManager
 
-import cpw.mods.fml.common.Mod
+import cpw.mods.fml.common.{Mod, SidedProxy, FMLCommonHandler}
 import cpw.mods.fml.common.event._
-import cpw.mods.fml.common.SidedProxy
 import cpw.mods.fml.relauncher._
 import cpw.mods.fml.common.network.NetworkRegistry
 import net.minecraftforge.common.MinecraftForge
@@ -43,8 +42,10 @@ object ModInstance
 		flag.register
 		proxy.init()
 
-		network.registerMessage(classOf[LinkStateChangedPacketHandler], classOf[PacketLinkStateChanged], 0, Side.CLIENT)
-		MinecraftForge.EVENT_BUS.register(WorldRenderer)
+		network.registerMessage(classOf[LinkEstablishedPacketHandler], classOf[PacketLinkEstablished], 1, Side.CLIENT)
+		network.registerMessage(classOf[TerminalBrokenPacketHandler], classOf[PacketTerminalBroken], 2, Side.CLIENT)
+		MinecraftForge.EVENT_BUS.register(WorldEvents)
+		FMLCommonHandler.instance.bus.register(FMLEvents)
 	}
 }
 

@@ -22,7 +22,8 @@ libraryDependencies ++= Seq(
 	"com.paulscode" % "librarylwjglopenal" % "20100824",
 	"com.paulscode" % "codecjorbis" % "20101023",
 	"org.lwjgl.lwjgl" % "lwjgl_util" % "2.9.1",
-	"com.cterm2" %% "tetrafw" % "1.0.0-dev"
+	"com.cterm2" %% "tetrafw" % "1.0.0-dev",
+	"com.google.code.findbugs" % "jsr305" % "1.3.+"
 )
 resolvers += "minecraft" at "https://libraries.minecraft.net"
 val srcJarVersionSignature = Seq(minecraftVersion, forgeVersion, minecraftVersion) mkString "-"
