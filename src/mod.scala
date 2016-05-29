@@ -19,6 +19,8 @@ object ModInstance
 	logger.info(s"${Name} version ${VersionStr}")
 	final val network = NetworkRegistry.INSTANCE.newSimpleChannel(ID)
 
+	final val InterfaceID = 1
+
 	trait IProxy
 	{
 		def init(): Unit
@@ -30,7 +32,7 @@ object ModInstance
 	{
 		def init()
 		{
-			flag.registerClient
+			render.flag.init()
 		}
 	}
 	@SidedProxy(modId=ModInstance.ID, serverSide="com.cterm2.miniflags.ModInstance$ServerProxy", clientSide="com.cterm2.miniflags.ModInstance$ClientProxy")
@@ -42,10 +44,10 @@ object ModInstance
 		flag.register
 		proxy.init()
 
-		network.registerMessage(classOf[LinkEstablishedPacketHandler], classOf[PacketLinkEstablished], 1, Side.CLIENT)
-		network.registerMessage(classOf[TerminalBrokenPacketHandler], classOf[PacketTerminalBroken], 2, Side.CLIENT)
+		intercommands.registerMessages()
 		MinecraftForge.EVENT_BUS.register(WorldEvents)
 		FMLCommonHandler.instance.bus.register(FMLEvents)
+		NetworkRegistry.INSTANCE.registerGuiHandler(this, GuiHandler)
 	}
 }
 
@@ -53,5 +55,5 @@ object CreativeTab extends net.minecraft.creativetab.CreativeTabs(ModInstance.ID
 {
 	import net.minecraft.init.Blocks, net.minecraft.item.Item
 
-	override val getTabIconItem = Item.getItemFromBlock(Blocks.wool)
+	override lazy val getTabIconItem = Item.getItemFromBlock(flag.Block0)
 }

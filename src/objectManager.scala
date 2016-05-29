@@ -1,26 +1,63 @@
 package com.cterm2.miniflags
 
-import java.io.{DataInputStream, DataOutputStream}
 import net.minecraft.nbt._
-import net.minecraft.world.{World, WorldSavedData}
+import net.minecraft.world._
+import net.minecraft.client.multiplayer.WorldClient
 import net.minecraft.entity.player.{EntityPlayer, EntityPlayerMP}
 import net.minecraft.util.ChatComponentText
+import cpw.mods.fml.relauncher.{Side, SideOnly}
+import net.minecraftforge.common.DimensionManager
+import scalaz._, Scalaz._
 
+final case class Coordinate(x: Int, y: Int, z: Int)
+final case class Link(src: Coordinate, dest: Coordinate)
+
+// Client Side Structure of Links between Flags
+object ClientLinkManager
+{
+	private var _links = Seq[Link]()
+	def links = this._links					//* readonly "links"
+
+	def addLink(src: Coordinate, dest: Coordinate)
+	{
+		this._links = this.links :+ Link(src, dest)
+	}
+	def unregisterTerm(p: Coordinate)
+	{
+		this._links = this.links filterNot { case Link(s, d) => s == p || d == p }
+	}
+	def initialize()
+	{
+		this._links = Seq[Link]()
+	}
+
+	def getLinkDestination(coord: Coordinate) = this.links collect { case Link(cs, d) if cs == coord => d } headOption
+}
+
+// Server Side Structure of Links and Object Coordinates of Flags
 object ObjectManager
 {
 	final val ID = ModInstance.ID + "_FlagObjectManager"
 
-	def instanceForWorld(world: World) = Option(world.loadItemData(classOf[ObjectManager], ID)) collect { case x: ObjectManager => x }
+	def instanceForWorld(world: World) =
+	{
+		assert(!world.isRemote)
+		val mappedID = s"${ID}-${world.provider.dimensionId}"
+		(Option(world.loadItemData(classOf[ObjectManager], mappedID)) match
+		{
+			case Some(instance: ObjectManager) => Some(instance)
+			case None => Option(new ObjectManager(mappedID)) map (x => { world.setItemData(mappedID, x); x })
+			case _ => None
+		}) map (_.setWorld(world))
+	}
 }
-// Object(Flag) Manager
 final class ObjectManager(id: String) extends WorldSavedData(id)
 {
-	import com.cterm2.tetra.ActiveNBTRecord._
+	import com.cterm2.tetra.ActiveNBTRecord._, ObjectManager._
 	import scalaz._, Scalaz._
 
-	final case class Coordinate(x: Int, y: Int, z: Int)
-	final case class Link(src: Coordinate, dest: Coordinate)
-
+	private var worldObj: World = null
+	def setWorld(w: World) = { this.worldObj = w; this }
 	private def getTag(c: Any) = c match
 	{
 		case Coordinate(x, y, z) =>
@@ -44,46 +81,49 @@ final class ObjectManager(id: String) extends WorldSavedData(id)
 			case List(sx, sy, sz, dx, dy, dz) => Link(Coordinate(sx, sy, sz), Coordinate(dx, dy, dz))
 		}
 
-	private var terminalCoordinates = Seq[Coordinate]()
-	private var links = Seq[Link]()
+	private var _terminalCoordinates = Seq[Coordinate]()
+	private var _links = Seq[Link]()
+	// Read-only Uniform Accessing and Auto Marking as Dirty
+	def terminalCoordinates = this._terminalCoordinates
+	def links = this._links
+	private def terminalCoordinates_=(list: Seq[Coordinate]) { this._terminalCoordinates = list; this.markDirty() }
+	private def links_=(list: Seq[Link]) { this._links = list; this.markDirty() }
 
-	def register(x: Int, y: Int, z: Int)
+	def register(x: Int, y: Int, z: Int) { this.terminalCoordinates = this.terminalCoordinates :+ Coordinate(x, y, z) }
+	def unregister(dim: Int, x: Int, y: Int, z: Int)
 	{
-		// ModInstance.logger.info(s"Register Object at ($x, $y, $z)")
-		this.terminalCoordinates = this.terminalCoordinates :+ Coordinate(x, y, z)
-		this.markDirty()
+		val crd = Coordinate(x, y, z)
+		this.terminalCoordinates = this.terminalCoordinates filterNot (_ == crd)
+		this.links = this.links filterNot { case Link(cs, cd) => cs == crd || cd == crd }
+		intercommands.UnregisterTerm(crd) broadcastIn dim
 	}
-	def unregister(x: Int, y: Int, z: Int)
+	def link(player: EntityPlayer, sx: Int, sy: Int, sz: Int, dx: Int, dy: Int, dz: Int)
 	{
-		// ModInstance.logger.info(s"Unregister Object at ($x, $y, $z)")
-		this.terminalCoordinates = this.terminalCoordinates filterNot { case Coordinate(xx, yy, zz) => xx == x && yy == y && zz == z }
-		this.links = this.links filterNot
-		{
-			case Link(Coordinate(sx, sy, sz), Coordinate(dx, dy, dz)) => (sx == x && sy == y && sz == z) || (dx == x && dy == y && dz == z)
-		}
-		ModInstance.network.sendToAll(new PacketTerminalBroken(x, y, z))
-		this.markDirty()
-	}
-	def link(world: World, player: EntityPlayer, sx: Int, sy: Int, sz: Int, dx: Int, dy: Int, dz: Int)
-	{
-		val validation1 = this.terminalCoordinates find { case Coordinate(x, y, z) => sx == x && sy == y && sz == z }
-		val validation2 = this.terminalCoordinates find { case Coordinate(x, y, z) => dx == x && dy == y && dz == z }
+		val (src, dst) = (Coordinate(sx, sy, sz), Coordinate(dx, dy, dz))
 
-		(validation1, validation2) match
+		if((this.terminalCoordinates contains src) && (this.terminalCoordinates contains dst))
 		{
-		case (Some(s), Some(d)) =>
-			this.links = this.links :+ Link(s, d)
-			ModInstance.network.sendToAll(new PacketLinkEstablished(sx, sy, sz, dx, dy, dz))
+			this.links = this.links :+ Link(src, dst)
+			intercommands.NewLink(src, dst) broadcastIn player.dimension
 			player.addChatComponentMessage(new ChatComponentText(s"Successfully linked from ($sx, $sy, $sz) to ($dx, $dy, $dz)"))
-			flag.playLinkedSound(world, sx, sy, sz)
-			this.markDirty()
-		case _ => ModInstance.logger.warn(s"Invalid Linking from ($sx, $sy, $sz) to ($dx, $dy, $dz)")
+			flag.playLinkedSound(this.worldObj, sx, sy, sz)
 		}
+		else ModInstance.logger.warn(s"Invalid Linking from ($sx, $sy, $sz) to ($dx, $dy, $dz)")
 	}
+	def getLinkDestinationFrom(x: Int, y: Int, z: Int) = getLinkDestinationFrom_(Coordinate(x, y, z))
+	def getLinkedCoordinate(x: Int, y: Int, z: Int) = getLinkedCoordinate_(Coordinate(x, y, z))
+
+	// impl //
+	private def getLinkDestinationFrom_(coord: Coordinate) = this.links find { case Link(src, _) => src == coord } map { case Link(_, t) => t }
+	private def getLinkedCoordinate_(coord: Coordinate) = this.links collect
+	{
+		case Link(src, dest) if src == coord => dest
+		case Link(src, dest) if dest == coord => src
+	} headOption
 
 	override def writeToNBT(tag: NBTTagCompound)
 	{
-		ModInstance.logger.info("Saving World Flag Data...")
+		// ModInstance.logger.info("Saving World Flag Data...")
 
 		val tagTerminals = new NBTTagList
 		val tagLinks = new NBTTagList
@@ -95,7 +135,7 @@ final class ObjectManager(id: String) extends WorldSavedData(id)
 	}
 	override def readFromNBT(tag: NBTTagCompound)
 	{
-		ModInstance.logger.info("Loading World Flag Data...")
+		// ModInstance.logger.info("Loading World Flag Data...")
 
 		for(terminals <- tag[NBTTagList]("Terminals"))
 		{
@@ -106,11 +146,12 @@ final class ObjectManager(id: String) extends WorldSavedData(id)
 			this.links = ((0 until links.tagCount).toList map links.getCompoundTagAt map getLinkFromTag).sequence | Nil
 		}
 	}
-	def synchronizeAllLinks(player: EntityPlayer)
+	def synchronizeAllLinks(player: EntityPlayerMP)
 	{
-		for(Link(Coordinate(sx, sy, sz), Coordinate(dx, dy, dz)) <- this.links)
+		intercommands.InitializeDimension dispatchTo player
+		for(Link(src, dest) <- this.links)
 		{
-			ModInstance.network.sendTo(new PacketLinkEstablished(sx, sy, sz, dx, dy, dz), player.asInstanceOf[EntityPlayerMP])
+			intercommands.NewLink(src, dest) dispatchTo player
 		}
 	}
 }

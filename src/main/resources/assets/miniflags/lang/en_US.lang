@@ -1,0 +1,6 @@
+# Interface Labels
+gui.labels.UnlinkedFlags=Unlinked Flag
+gui.labels.LinkedFlags=Linked Flag
+gui.labels.FlagName=Name:
+gui.labels.FlagHash=ID
+gui.labels.LinkTo=Link To:

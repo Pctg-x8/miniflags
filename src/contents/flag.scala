@@ -9,7 +9,6 @@ package object flag
 	import com.cterm2.tetra.ContentRegistry
 	import cpw.mods.fml.client.registry.{ClientRegistry, RenderingRegistry}
 
-	var RenderID = 0
 	var itemBlockSummoner: BlockSummoner = null
 
 	def register
@@ -22,13 +21,6 @@ package object flag
 
 		itemBlockSummoner = Item.getItemFromBlock(Block0).asInstanceOf[BlockSummoner]
 	}
-	@SideOnly(Side.CLIENT)
-	def registerClient
-	{
-		ClientRegistry.bindTileEntitySpecialRenderer(classOf[TileData], TERenderer)
-		RenderID = RenderingRegistry.getNextAvailableRenderId
-		RenderingRegistry.registerBlockHandler(BlockRenderer)
-	}
 
 	def playLinkedSound(world: World, x: Int, y: Int, z: Int)
 	{
@@ -39,15 +31,17 @@ package object flag
 
 package flag
 {
+	import com.cterm2.miniflags.render.flag._
+
 	import net.{minecraft => mc}
 	import mc.item.ItemBlock
 	import mc.block.{Block, BlockContainer}, mc.block.material.Material
-	import mc.world.World, mc.entity.player.EntityPlayer
-	import mc.tileentity.TileEntity, mc.client.renderer.tileentity.TileEntitySpecialRenderer
+	import mc.world._, mc.entity.player.EntityPlayer
+	import mc.client.multiplayer.WorldClient
+	import mc.tileentity.TileEntity
 	import mc.util._, mc.entity.{Entity, EntityLivingBase}
 	import mc.item.ItemStack
 	import scalaz._, Scalaz._
-	import cpw.mods.fml.client.registry.ISimpleBlockRenderingHandler
 	import mc.init.Blocks, mc.creativetab.CreativeTabs
 	import mc.nbt.NBTTagCompound
 	import com.cterm2.tetra.ActiveNBTRecord._
@@ -60,59 +54,17 @@ package flag
 		final val Pole = 1.5f / 16.0f
 		final val FlagThickness = 0.75f / 16.0f
 	}
-
-	class BlockSummoner(block: Block) extends ItemBlock(block)
+	object ItemKeys
 	{
-		setMaxStackSize(1).setHasSubtypes(true).setMaxDamage(0)
-
-		override def getIconFromDamage(damage: Int) = block.getIcon(2, damage)
-		override def getMetadata(meta: Int) = meta
-
-		override def onItemUse(stack: ItemStack, player: EntityPlayer, world: World, x: Int, y: Int, z: Int, side: Int,
-			hitX: Float, hitY: Float, hitZ: Float) =
-		{
-			// Block Direction by RotationYaw
-			val blk = (MathHelper.floor_double((player.rotationYaw / 90.0f).toDouble + 0.5d) & 3) match
-			{
-				case 0 => Block0
-				case 1 => Block90
-				case 2 => Block180
-				case 3 => Block270
-			}
-
-			// displacement check
-			val (finalY, finalZ, finalX, finalSide) = world.getBlock(x, y, z) match
-			{
-				case Blocks.snow if (world.getBlockMetadata(x, y, z) & 7) < 1 => (y, z, x, 1)
-				case Blocks.vine | Blocks.tallgrass | Blocks.deadbush => (y, z, x, side)
-				case b: Block if b.isReplaceable(world, x, y, z) => (y, z, x, side)
-				case _ =>
-				(
-					if(side == 0) y - 1 else if(side == 1) y + 1 else y,
-					if(side == 2) z - 1 else if(side == 3) z + 1 else z,
-					if(side == 4) x - 1 else if(side == 5) x + 1 else x,
-					side
-				)
-			}
-
-			// validation
-			val stackHasItem = stack.stackSize > 0
-			val playerEditable = player.canPlayerEdit(finalX, finalY, finalZ, finalSide, stack)
-			val heightLimitation = finalY >= 255
-			val isSolidBlock = blk.getMaterial.isSolid
-			val canPlaceEntityOnSide = world.canPlaceEntityOnSide(blk, finalX, finalY, finalZ, false, finalSide, player, stack)
-			if(stackHasItem && playerEditable && !(heightLimitation && isSolidBlock) && canPlaceEntityOnSide)
-			{
-				val meta = this.getMetadata(stack.getItemDamage)
-				val actionResult = blk.onBlockPlaced(world, finalX, finalY, finalZ, finalSide, hitX, hitY, hitZ, meta)
-
-				BlockSummoner.placeBlockAt(world, finalX, finalY, finalZ, blk, actionResult, player, stack)
-			}
-			else false
-		}
+		final val ReservedLinkingDestinationCoordinate = "ReservedLinkingDestinationCoordinate"
 	}
+
 	object BlockSummoner
 	{
+		val retrieveReservedLinkingDestinationCoordinate: ItemStack => Option[List[Int]] =
+			stack => Option(stack.getTagCompound) >>= (_[NBTTagCompound](ItemKeys.ReservedLinkingDestinationCoordinate)) >>=
+			(tag => (tag[Int]("x") :: tag[Int]("y") :: tag[Int]("z") :: Nil).sequence)
+
 		def reserveLinkingDestinationCoordinate(world: World, stack: ItemStack, x: Int, y: Int, z: Int, player: EntityPlayer)
 		{
 			val tagDestCoord = new NBTTagCompound
@@ -121,9 +73,26 @@ package flag
 			tagDestCoord("z") = z
 
 			val tag = Option(stack.getTagCompound) getOrElse { val v = new NBTTagCompound; stack.setTagCompound(v); v }
-			tag("ReservedLinkingDestinationCoordinate") = tagDestCoord
+			tag(ItemKeys.ReservedLinkingDestinationCoordinate) = tagDestCoord
 			player.addChatComponentMessage(new ChatComponentText(s"Reserved Linking to ($x, $y, $z)"))
 			playLinkedSound(world, x, y, z)
+		}
+		private def postPlaceAction(world: WorldServer, x: Int, y: Int, z: Int, stack: ItemStack, player: EntityPlayer)
+		{
+			// Register Object
+			ObjectManager.instanceForWorld(world) foreach (_.register(x, y, z))
+			// Naming
+			if(stack.hasDisplayName) Option(world.getTileEntity(x, y, z)) foreach { case x: TileData => x.name = stack.getDisplayName }
+			// Do reserved linking
+			retrieveReservedLinkingDestinationCoordinate(stack) foreach
+			{
+				case List(dx, dy, dz) => Option(world.getTileEntity(dx, dy, dz)) match
+				{
+					case Some(tile: TileData) => ObjectManager.instanceForWorld(world) foreach (_.link(player, x, y, z, dx, dy, dz))
+					case _ => player.addChatComponentMessage(new ChatComponentText("Destination is not found or removed"))
+				}
+				case _ => ModInstance.logger.warn("ReservedLinkingDestinationCoordinate data is broken")
+			}
 		}
 		def placeBlockAt(world: World, x: Int, y: Int, z: Int, block: Block, meta: Int, player: EntityPlayer, stack: ItemStack) =
 		{
@@ -131,29 +100,7 @@ package flag
 			val blockValidation = blockPlaceResult && world.getBlock(x, y, z) == block
 
 			// Successfully placed block in server: Do post action
-			if(blockValidation && !world.isRemote)
-			{
-				val tile = Option(world.getTileEntity(x, y, z))
-
-				// Register Object
-				ObjectManager.instanceForWorld(world) foreach (_.register(x, y, z))
-				// Naming
-				if(stack.hasDisplayName) tile foreach { case x: TileData => x.name = Some(stack.getDisplayName) }
-				// Do reserved linking
-				(Option(stack.getTagCompound) >>= (x => x[NBTTagCompound]("ReservedLinkingDestinationCoordinate")) >>=
-					(tag => (tag[Int]("x") :: tag[Int]("y") :: tag[Int]("z") :: Nil).sequence)) foreach
-				{
-					case List(dx, dy, dz) => tile match
-					{
-						case Some(tile: TileData) => ObjectManager.instanceForWorld(world) foreach (_.link(world, player, x, y, z, dx, dy, dz))
-						case _ => player.addChatComponentMessage(new ChatComponentText("Destination is not found or removed"))
-					}
-					case _ => ModInstance.logger.warn("ReservedLinkingDestinationCoordinate data is broken")
-				}
-
-				// Sync TileData
-				world.markBlockForUpdate(x, y, z)
-			}
+			if(blockValidation && !world.isRemote) postPlaceAction(world.asInstanceOf[WorldServer], x, y, z, stack, player)
 			// Play Sound and decrease stack if placing block has succeeded
 			if(blockPlaceResult)
 			{
@@ -163,18 +110,97 @@ package flag
 			}
 			true
 		}
+
+		private def positionDetection(world: World, x: Int, y: Int, z: Int, side: Int) = world.getBlock(x, y, z) match
+		{
+			case Blocks.snow if (world.getBlockMetadata(x, y, z) & 7) < 1 => (x, y, z, 1)
+			case Blocks.vine | Blocks.tallgrass | Blocks.deadbush => (x, y, z, side)
+			case b: Block if b.isReplaceable(world, x, y, z) => (x, y, z, side)
+			case _ =>
+			(
+				if(side == 4) x - 1 else if(side == 5) x + 1 else x,
+				if(side == 0) y - 1 else if(side == 1) y + 1 else y,
+				if(side == 2) z - 1 else if(side == 3) z + 1 else z,
+				side
+			)
+		}
+	}
+	class BlockSummoner(block: Block) extends ItemBlock(block)
+	{
+		import BlockSummoner._
+
+		setMaxStackSize(1).setHasSubtypes(true).setMaxDamage(0)
+
+		override def getIconFromDamage(damage: Int) = block.getIcon(2, damage)
+		override def getMetadata(meta: Int) = meta
+
+		// onItemUse with Sneaking State
+		private def onSneakingAction(stack: ItemStack, player: EntityPlayer) =
+			Option(stack.getTagCompound) match
+			{
+				case Some(x) if x hasKey ItemKeys.ReservedLinkingDestinationCoordinate =>
+					x.removeTag(ItemKeys.ReservedLinkingDestinationCoordinate)
+					player.addChatComponentMessage(new ChatComponentText("Cleared reserved linking"))
+					true
+				case _ => false
+			}
+		// onItemUse without Sneaking State
+		private def onPlacingAction(stack: ItemStack, player: EntityPlayer, world: World, hitX: Float, hitY: Float, hitZ: Float)(x: Int, y: Int, z: Int, side: Int) =
+		{
+			// Block Direction by RotationYaw
+			val blk = MathHelper.floor_double((player.rotationYaw / 90.0f).toDouble + 0.5d) & 3 match
+			{
+				case 0 => Block0
+				case 1 => Block90
+				case 2 => Block180
+				case 3 => Block270
+			}
+
+			// validation
+			val stackHasItem = stack.stackSize > 0
+			val playerEditable = player.canPlayerEdit(x, y, z, side, stack)
+			val isHeightLimit = y >= 255
+			val isSolidBlock = blk.getMaterial.isSolid
+			val canPlaceEntityOnSide = world.canPlaceEntityOnSide(blk, x, y, z, false, side, player, stack)
+			if(stackHasItem && playerEditable && !(isHeightLimit && isSolidBlock) && canPlaceEntityOnSide)
+			{
+				val meta = this.getMetadata(stack.getItemDamage)
+				val actionResult = blk.onBlockPlaced(world, x, y, z, side, hitX, hitY, hitZ, meta)
+				BlockSummoner.placeBlockAt(world, x, y, z, blk, actionResult, player, stack)
+			}
+			else false
+		}
+		override def onItemUse(stack: ItemStack, player: EntityPlayer, world: World, x: Int, y: Int, z: Int, side: Int, hitX: Float, hitY: Float, hitZ: Float) =
+			(onPlacingAction(stack, player, world, hitX, hitY, hitZ) _).tupled(positionDetection(world, x, y, z, side))
+		override def onItemRightClick(stack: ItemStack, world: World, player: EntityPlayer) =
+		{
+			if(!world.isRemote && player.isSneaking) onSneakingAction(stack, player)
+			stack
+		}
+
+		override def addInformation(stack: ItemStack, player: EntityPlayer, lines: java.util.List[_], b: Boolean)
+		{
+			BlockSummoner.retrieveReservedLinkingDestinationCoordinate(stack) foreach
+			{
+				case List(dx, dy, dz) => lines.asInstanceOf[java.util.List[String]].add(s"Reserved linking to ($dx, $dy, $dz)")
+				case _ => /* Nothing to do */
+			}
+		}
 	}
 	sealed abstract class AbstractBlock extends BlockContainer(Material.rock)
 	{
-		this.setHardness(0.125f)
-		this.setHarvestLevel(null, 0)
+		this.setHardness(0.0f)
 		this.setBlockBounds(Parameters.Space, 0.0f, Parameters.Space, Parameters.InvSpace, 1.0f, Parameters.InvSpace)
 
 		override val isOpaqueCube = false
 		override val isNormalCube = false
 		override val renderAsNormalBlock = false
-		override def getRenderType = RenderID
+		override def getRenderType = render.flag.RenderID
 		override def getIcon(side: Int, meta: Int) = Blocks.planks.getIcon(side, 0)
+		override val canSilkHarvest = false
+		override def getHarvestLevel(meta: Int) = 0
+		override def getHarvestTool(meta: Int) = null
+		override val getMobilityFlag = 2
 
 		// Collision Box for Visibility Testing(getCollisionBoundingBoxFromPool)
 		// Collision Test against Entities
@@ -192,31 +218,67 @@ package flag
 		{
 			if(!world.isRemote)
 			{
-				val activateWith = Option(player.inventory.getCurrentItem)
+				val activateWith = Option(player.inventory.getCurrentItem) filter (_.getItem == itemBlockSummoner)
 
-				activateWith filter (_.getItem == itemBlockSummoner) foreach
+				activateWith match
 				{
-					s => BlockSummoner.reserveLinkingDestinationCoordinate(world, s, x, y, z, player)
+					case Some(t: ItemStack) => BlockSummoner.reserveLinkingDestinationCoordinate(world, t, x, y, z, player)
+					case _ => player.openGui(ModInstance, ModInstance.InterfaceID, world, x, y, z)
 				}
 				true
 			}
 			else world.isRemote
 		}
-		override def breakBlock(world: World, x: Int, y: Int, z: Int, block: Block, meta: Int)
+		override def onBlockHarvested(world: World, x: Int, y: Int, z: Int, meta: Int, player: EntityPlayer)
 		{
+			// ModInstance.logger.info("onBlockHarvested")
 			if(!world.isRemote)
 			{
-				ObjectManager.instanceForWorld(world) foreach (_.unregister(x, y, z))
+				if(!player.capabilities.isCreativeMode)
+				{
+					// Make ItemStack(with Name and LinkDestination) for dropping
+					(Option(world.getTileEntity(x, y, z)) >>=
+					{
+						case tile: TileData => ObjectManager.instanceForWorld(world.asInstanceOf[WorldServer]) >>= (this.getDropItem(world, x, y, z, meta, tile, _))
+						case _ => None
+					}) foreach (this.dropBlockAsItem(world, x, y, z, _))
+				}
 			}
+		}
+		private def unregisterBlock(world: WorldServer, x: Int, y: Int, z: Int)
+		{
+			ObjectManager.instanceForWorld(world) foreach (_.unregister(world.provider.dimensionId, x, y, z))
+		}
+		override def breakBlock(world: World, x: Int, y: Int, z: Int, block: Block, meta: Int)
+		{
+			// ModInstance.logger.info("BreakBlock")
+			if(!world.isRemote) unregisterBlock(world.asInstanceOf[WorldServer], x, y, z)
 			super.breakBlock(world, x, y, z, block, meta)
 		}
+		// Make ItemStack(with Name and LinkDestination) for dropping
+		private def getDropItem(world: World, x: Int, y: Int, z: Int, meta: Int, tile: TileData, mgr: ObjectManager) =
+			Option(new ItemStack(itemBlockSummoner, 1, meta)) map (stack =>
+			{
+				Option(new NBTTagCompound) map (tag =>
+				{
+					mgr.getLinkDestinationFrom(x, y, z) map
+					{
+						case Coordinate(dx, dy, dz) => Option(new NBTTagCompound) map (tag_c =>
+						{
+							tag_c("x") = dx; tag_c("y") = dy; tag_c("z") = dz
+							tag_c
+						})
+					} foreach (tag(ItemKeys.ReservedLinkingDestinationCoordinate) = _)
+					tag
+				}) foreach stack.setTagCompound
+				ModInstance.logger.info(s"TileName: ${tile.name}")
+				tile.name foreach stack.setStackDisplayName
+				stack
+			})
 
+		// No items is dropped
 		override def getDrops(world: World, x: Int, y: Int, z: Int, meta: Int, fortune: Int) =
-		{
-			val items = new java.util.ArrayList[ItemStack]
-			items.add(new ItemStack(itemBlockSummoner, 1, world.getBlockMetadata(x, y, z)))
-			items
-		}
+			new java.util.ArrayList[ItemStack]
 		override def getPickBlock(target: MovingObjectPosition, world: World, x: Int, y: Int, z: Int, player: EntityPlayer) =
 			new ItemStack(Item.getItemFromBlock(Block0), 1, world.getBlockMetadata(x, y, z))
 		override def getSubBlocks(source: Item, tab: CreativeTabs, list: java.util.List[_])
@@ -229,22 +291,23 @@ package flag
 	object Block180 extends AbstractBlock
 	object Block270 extends AbstractBlock
 
+	// Simple Name Holder
 	class TileData extends TileEntity
 	{
 		import mc.network.play.server.S35PacketUpdateTileEntity
 		import mc.network.NetworkManager
 
-		var name: Option[String] = None
+		var _name: Option[String] = None
+		def name = this._name
+		def name_=(str: String)
+		{
+			this._name = Some(str); this.markDirty(); this.worldObj.markBlockForUpdate(this.xCoord, this.yCoord, this.zCoord)
+		}
+		def hashID = ((this.yCoord.toLong & 0xff) << 56) | ((this.xCoord.toLong & 0xfffffff) << 28) | (this.zCoord.toLong & 0xfffffff)
+		def coord = Coordinate(xCoord, yCoord, zCoord)
 
 		def hasCustomName = this.name.isDefined
-		def onBreak()
-		{
-			// Unlink from others
-			// this.linkedFrom foreach { x => x.linkTo = None }
-			// this.linkTo foreach { x => x.linkedFrom = x.linkedFrom filter (_ != this) }
-			// Tell breaking terminal to client
-			// if(linkTo.isDefined || !linkedFrom.isEmpty) ModInstance.network.sendToAll(new PacketTerminalBroken(this.xCoord, this.yCoord, this.zCoord))
-		}
+		def nameOrDefaultLocalized = this.name | Block0.getLocalizedName()
 
 		override def writeToNBT(tag: NBTTagCompound)
 		{
@@ -254,7 +317,7 @@ package flag
 		override def readFromNBT(tag: NBTTagCompound)
 		{
 			super.readFromNBT(tag)
-			this.name = tag[String]("CustomName")
+			this._name = tag[String]("CustomName")
 		}
 		override def getDescriptionPacket() =
 			(Option(new NBTTagCompound) >>=
@@ -268,163 +331,161 @@ package flag
 		{
 			for(x <- Option(packet) >>= (x => Option(x.func_148857_g)))
 			{
-				this.name = x[String]("CustomName")
+				this._name = x[String]("CustomName")
 			}
 		}
 	}
-	object BlockRenderer extends ISimpleBlockRenderingHandler
+
+	// --- Container and GUIs ---
+	import net.minecraft.inventory.Container
+	import net.minecraft.client.gui._
+	import net.minecraft.client.gui.inventory.GuiContainer
+	import net.minecraft.util.{Vec3, ResourceLocation}
+	import com.cterm2.tetra.LocalTranslationUtils._
+
+	final class FlagSettingsContainer(val tile: TileData) extends Container
 	{
-		import mc.block.Block
-		import mc.client.renderer.{RenderBlocks, Tessellator, EntityRenderer}
-		import mc.world.IBlockAccess
-		import org.lwjgl.opengl.GL11._
-		import com.cterm2.tetra.StaticMeshData._
-
-		implicit class MeshConstructorHelper(val mesh: StaticMesh) extends AnyVal
-		{
-			def renderBase() = mesh.setRenderBounds(Parameters.Space, 0.0f, Parameters.Space, Parameters.InvSpace, Parameters.BaseHeight, Parameters.InvSpace).
-				renderFaceYPos.renderFaceXZ
-			def renderPole() = mesh.setRenderBounds(0.5f - Parameters.Pole, Parameters.BaseHeight, 0.5f - Parameters.Pole, 0.5f + Parameters.Pole, 1.0f, 0.5f + Parameters.Pole).
-				renderFaceXZ
-			def renderFlagPart(n: Int) = mesh.setRenderBounds(0.5f + Parameters.Pole + n * 1.25f / 16.0f, 1.0f - (3.0f + 1.0f + 1.0f + 3.0f - n) / 16.0f, 0.5f - Parameters.FlagThickness,
-				0.5f + Parameters.Pole + (1 + n) * 1.25f / 16.0f, 1.0f - (n + 1.0f) / 16.0f, 0.5f + Parameters.FlagThickness).
-				renderFaceYPos.renderFaceYNeg.renderFaceXPos.renderFaceZNeg.renderFaceZPos
-			def renderFlagPart90(n: Int) = mesh.setRenderBounds(0.5f - Parameters.FlagThickness, 1.0f - (3.0f + 1.0f + 1.0f + 3.0f - n) / 16.0f, 0.5f + Parameters.Pole + n * 1.25f / 16.0f,
-				0.5f + Parameters.FlagThickness, 1.0f - (n + 1.0f) / 16.0f, 0.5f + Parameters.Pole + (1 + n) * 1.25f / 16.0f).
-				renderFaceYPos.renderFaceYNeg.renderFaceZPos.renderFaceXNeg.renderFaceXPos
-			def renderFlagPartInv(n: Int) = mesh.setRenderBounds(0.5f - Parameters.Pole - (n + 1.0f) * 1.25f / 16.0f, 1.0f - (3.0f + 1.0f + 1.0f + 3.0f - n) / 16.0f, 0.5f - Parameters.FlagThickness,
-				0.5f - Parameters.Pole - n * 1.25f / 16.0f, 1.0f - (n + 1.0f) / 16.0f, 0.5f + Parameters.FlagThickness).
-				renderFaceYPos.renderFaceYNeg.renderFaceXNeg.renderFaceZNeg.renderFaceZPos
-			def renderFlagPart90Inv(n: Int) = mesh.setRenderBounds(0.5f - Parameters.FlagThickness, 1.0f - (3.0f + 1.0f + 1.0f + 3.0f - n) / 16.0f, 0.5f - Parameters.Pole - (n + 1.0f) * 1.25f / 16.0f,
-				0.5f + Parameters.FlagThickness, 1.0f - (n + 1.0f) / 16.0f, 0.5f - Parameters.Pole - n * 1.25f / 16.0f).
-				renderFaceYPos.renderFaceYNeg.renderFaceZNeg.renderFaceXNeg.renderFaceXPos
-		}
-		val meshBase = EmptyStaticMesh.renderBase
-		val meshPole = EmptyStaticMesh.renderPole
-		val meshBase2 = EmptyStaticMesh.renderBase.renderFaceYNeg
-		val meshPole2 = EmptyStaticMesh.renderPole.renderFaceYPos
-		val meshdata = EmptyStaticMesh.renderFlagPart(0).renderFlagPart(1).renderFlagPart(2).renderFlagPart(3)
-		val meshdata90 = EmptyStaticMesh.renderFlagPart90(0).renderFlagPart90(1).renderFlagPart90(2).renderFlagPart90(3)
-		val meshdata180 = EmptyStaticMesh.renderFlagPartInv(0).renderFlagPartInv(1).renderFlagPartInv(2).renderFlagPartInv(3)
-		val meshdata270 = EmptyStaticMesh.renderFlagPart90Inv(0).renderFlagPart90Inv(1).renderFlagPart90Inv(2).renderFlagPart90Inv(3)
-		val meshdata2 = EmptyStaticMesh.renderFlagPart(0).renderFlagPart(1).renderFlagPart(2).renderFlagPart(3)
-
-		override def getRenderId() = RenderID
-		override def shouldRender3DInInventory(model: Int) = true
-		override def renderInventoryBlock(block: Block, meta: Int, model: Int, renderer: RenderBlocks)
-		{
-			glPushMatrix()
-			glRotatef(90.0f, 0.0f, 1.0f, 0.0f)
-			glScalef(1.25f, 1.25f, 1.25f)
-			glTranslatef(-0.5f, -0.5f, -0.5f)
-			meshBase2.renderWithNormals(Blocks.stone, 0, renderer)
-			meshPole2.renderWithNormals(Blocks.planks, 0, renderer)
-			meshdata2.renderWithNormals(Blocks.wool, meta, renderer)
-			glPopMatrix()
-		}
-		override def renderWorldBlock(world: IBlockAccess, x: Int, y: Int, z: Int, block: Block, model: Int, renderer: RenderBlocks) =
-		{
-			// Color Multiplier
-			val cm = block.colorMultiplier(world, x, y, z)
-			val (baseR, baseG, baseB) = ((cm >> 16 & 255).toFloat / 255.0f, (cm >> 8 & 255).toFloat / 255.0f, (cm & 255).toFloat / 255.0f)
-			val (r, g, b) = if(EntityRenderer.anaglyphEnable) ((baseR * 30.0f + baseG * 59.0f + baseB * 11.0f) / 100.0f, (baseR * 30.0f + baseG * 70.0f) / 100.0f, (baseR * 30.0f + baseB * 70.0f) / 100.0f)
-				else (baseR, baseG, baseB)
-
-			// Render with Color Multiplier
-			val tess = Tessellator.instance
-			val (upLight, xLight, zLight) = (0.5f, 0.8f, 0.6f)
-
-			// Render Base Bottom
-			if(renderer.renderAllFaces || block.shouldSideBeRendered(world, x, y - 1, z, 0))
-			{
-				tess.setBrightness(block.getMixedBrightnessForBlock(world, x, y - 1, z))
-				tess.setColorOpaque_F(upLight * r, upLight * g, upLight * b)
-				renderer.renderFaceYNeg(block, x, y, z, Blocks.stone.getBlockTextureFromSide(0))
-			}
-			// Render Pole Top
-			if(renderer.renderAllFaces || block.shouldSideBeRendered(world, x, y + 1, z, 1))
-			{
-				renderer.setRenderBounds(0.5f - Parameters.Pole, Parameters.BaseHeight, 0.5f - Parameters.Pole, 0.5f + Parameters.Pole, 1.0f, 0.5f + Parameters.Pole)
-				tess.setBrightness(block.getMixedBrightnessForBlock(world, x, y + 1, z))
-				tess.setColorOpaque_F(r, g, b)
-				renderer.renderFaceYPos(block, x, y, z, Blocks.planks.getBlockTextureFromSide(1))
-			}
-
-			// Render static meshes
-			meshBase.render(world, Blocks.stone, 0, x, y, z, renderer, upLight, xLight, zLight, r, g, b)
-			meshPole.render(world, Blocks.planks, 0, x, y, z, renderer, upLight, xLight, zLight, r, g, b)
-			val mesh = block match
-			{
-				case Block0 => meshdata
-				case Block90 => meshdata90
-				case Block180 => meshdata180
-				case Block270 => meshdata270
-			}
-			mesh.render(world, Blocks.wool, world.getBlockMetadata(x, y, z), x, y, z, renderer, upLight, xLight, zLight, r, g, b)
-			true
-		}
+		override def canInteractWith(player: EntityPlayer) =
+			player.getDistanceSq(tile.xCoord + 0.5d, tile.yCoord + 0.5d, tile.zCoord + 0.5d) <= 64.0d
 	}
-	object TERenderer extends TileEntitySpecialRenderer
-	{
+	// Ref: GuiRepair(Interface of Anvil)
+	@SideOnly(Side.CLIENT)
+	final class FlagSettingsInterface(val world: WorldClient, val tile: TileData) extends GuiContainer(new FlagSettingsContainer(tile))
+	{ CommonInterface =>
+		import org.lwjgl.input.Keyboard
 		import org.lwjgl.opengl.GL11._
-		import mc.client.renderer.Tessellator
 
-		val baseVertices =
+		// Interface Commons
+		private val resource = new ResourceLocation(ModInstance.ID, "guiBase.png")
+		private var nameInputField: GuiTextField = null
+		private val nameLabel = t"gui.labels.FlagName"
+		private val hashLabel =
 		{
-			val tess = new Tessellator
-
-			tess.setColorRGBA_F(0.0f, 0.0f, 0.0f , 0.375f)
-			tess.addVertex(0.0d, 0.0d, 0.0d)
-			tess.addVertex(0.0d, 1.0d, 0.0d)
-			tess.addVertex(1.0d, 1.0d, 0.0d)
-			tess.addVertex(1.0d, 0.0d, 0.0d)
-			tess.getVertexState(0.0f, 0.0f, 0.0f)
+			val base = t"gui.labels.FlagHash"
+			s"$base: #${java.lang.Long.toUnsignedString(tile.hashID)}"
 		}
 
-		override def renderTileEntityAt(tile: TileEntity, x: Double, y: Double, z: Double, p: Float)
+		private trait IInterface
 		{
-			val viewEntity = this.field_147501_a.field_147551_g
-			val fontRender = this.func_147498_b()
-			val contentStr = tile.asInstanceOf[TileData].name | Block0.getLocalizedName()
-			val contentMetrics = fontRender.getStringWidth(contentStr)
-			val pixelScaling = 1.6f / 60.0f
+			val titleLocalized = ""
 
-			def renderNameBase()
+			def onKeyType(chr: Char, rep: Int): Boolean
+			def updateScreen()
+			def onMouseClicked(x: Int, y: Int, button: Int)
+			def drawControls()
+			def drawLabels()
+		}
+		// Only can be constructed in initGui()
+		private final class UnlinkedFlagInterface extends IInterface
+		{
+			override val titleLocalized = t"gui.labels.UnlinkedFlags"
+			private val linkTargetInputField =
 			{
-				val tess = Tessellator.instance
-
-				tess.startDrawingQuads()
-				tess.setVertexState(this.baseVertices)
-				tess.draw()
-			}
-			def renderName() { fontRender.drawString(contentStr, 0, 0, 0xffffffff) }
-			def renderNamePlate()
-			{
-				glPushMatrix()
-				glScalef(contentMetrics, -8.0f, 1.0f)
-				glTranslated(-0.5d, 0.0d, 0.0d)
-				glEnable(GL_BLEND)
-				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-				Seq(GL_DEPTH_TEST, GL_TEXTURE_2D, GL_CULL_FACE, GL_LIGHTING) foreach glDisable
-				glDepthMask(false)
-				renderNameBase()
-				glEnable(GL_TEXTURE_2D)
-				glPopMatrix()
-				glTranslated(-contentMetrics * 0.5d, -8.0d, 0.0d)
-				renderName()
-				glDepthMask(true)
-				glDisable(GL_BLEND)
-				Seq(GL_DEPTH_TEST, GL_CULL_FACE, GL_LIGHTING) foreach glEnable
+				val o = new GuiTextField(CommonInterface.fontRendererObj, CommonInterface.guiLeft + 10, CommonInterface.guiTop + 58, CommonInterface.xSize - 39, 12)
+				o.setEnableBackgroundDrawing(false)
+				o.setMaxStringLength(20)
+				o
 			}
 
-			glPushMatrix()
-			glTranslated(x + 0.5d, y + 1.0d, z + 0.5d)
-			glRotatef(-viewEntity.rotationYaw, 0.0f, 1.0f, 0.0f)
-			glRotatef(viewEntity.rotationPitch, 1.0f, 0.0f, 0.0f)
-			glScalef(-pixelScaling, -pixelScaling, pixelScaling)
-			glColor4f(1.0f, 1.0f, 1.0f, 1.0f)
-			renderNamePlate()
-			glPopMatrix()
+			def onKeyType(chr: Char, rep: Int) = this.linkTargetInputField.textboxKeyTyped(chr, rep)
+			def updateScreen() { this.linkTargetInputField.updateCursorCounter() }
+			def onMouseClicked(x: Int, y: Int, button: Int) { this.linkTargetInputField.mouseClicked(x, y, button) }
+			def drawControls()
+			{
+				this.linkTargetInputField.drawTextBox()
+				CommonInterface.mc.renderEngine bindTexture CommonInterface.resource
+				CommonInterface.drawTexturedModalRect(CommonInterface.guiLeft + CommonInterface.xSize - 25, CommonInterface.guiTop + 54,
+					CommonInterface.xSize, 0, 17, 16)
+			}
+			def drawLabels()
+			{
+				CommonInterface.fontRendererObj.drawString(t"gui.labels.LinkTo", 4, 46, 0x404040)
+			}
+		}
+		private final class LinkedFlagInterface extends IInterface
+		{
+			override val titleLocalized = t"gui.labels.LinkedFlags"
+
+			def onKeyType(chr: Char, rep: Int) = false
+			def updateScreen() {}
+			def onMouseClicked(x: Int, y: Int, button: Int) {}
+			def drawControls() {}
+			def drawLabels() {}
+		}
+		private var interfaceHandler: IInterface = null
+
+		private def updateHasLinked() { this.initGui() }
+		override def initGui()
+		{
+			val hasLinked = ClientLinkManager.getLinkDestination(tile.coord).isDefined
+
+			super.initGui()
+
+			// Common Gui Initializer
+			Keyboard.enableRepeatEvents(true)
+			this.nameInputField =
+			{
+				val o = new GuiTextField(this.fontRendererObj, this.guiLeft + 10, this.guiTop + 32, this.xSize - 20, 12)
+				o.setEnableBackgroundDrawing(false)
+				o.setMaxStringLength(40)
+				o.setText(tile.nameOrDefaultLocalized)
+				o
+			}
+
+			this.interfaceHandler = if(!hasLinked) new UnlinkedFlagInterface else new LinkedFlagInterface
+		}
+		override def onGuiClosed()
+		{
+			super.onGuiClosed()
+			Keyboard.enableRepeatEvents(false)
+		}
+		override def keyTyped(chr: Char, rep: Int)
+		{
+			// Dispatching Key Event
+			if(this.nameInputField.textboxKeyTyped(chr, rep))
+			{
+				intercommands.UpdateFlagName(tile.coord, this.nameInputField.getText).dispatchToServer()
+			}
+			else if(!this.interfaceHandler.onKeyType(chr, rep)) super.keyTyped(chr, rep)
+		}
+		override def updateScreen()
+		{
+			super.updateScreen()
+			this.nameInputField.updateCursorCounter()
+			this.interfaceHandler.updateScreen()
+		}
+		override def mouseClicked(x: Int, y: Int, b: Int)
+		{
+			super.mouseClicked(x, y, b)
+			this.nameInputField.mouseClicked(x, y, b)
+			this.interfaceHandler.onMouseClicked(x, y, b)
+		}
+		override def drawScreen(p1: Int, p2: Int, p3: Float)
+		{
+			super.drawScreen(p1, p2, p3)
+			Seq(GL_LIGHTING, GL_BLEND) foreach glDisable
+			this.nameInputField.drawTextBox()
+			this.interfaceHandler.drawControls()
+			Seq(GL_LIGHTING, GL_BLEND) foreach glEnable
+		}
+
+		override def drawGuiContainerBackgroundLayer(p1: Float, p2: Int, p3: Int)
+		{
+			this.mc.renderEngine bindTexture resource
+			this.drawTexturedModalRect(this.guiLeft, this.guiTop, 0, 0, this.xSize, this.ySize)
+		}
+		override def drawGuiContainerForegroundLayer(p1: Int, p2: Int)
+		{
+			val headerText = this.interfaceHandler.titleLocalized
+			val headerWidth = this.fontRendererObj getStringWidth headerText
+			val disableSwitches = Seq(GL_LIGHTING, GL_BLEND)
+
+			disableSwitches foreach glDisable
+			this.fontRendererObj.drawString(headerText, (this.xSize - headerWidth) / 2, 6, 0x404040)
+			this.fontRendererObj.drawString(t"gui.labels.FlagName", 4, 20, 0x404040)
+			this.fontRendererObj.drawString(hashLabel, this.xSize - 3 - this.fontRendererObj.getStringWidth(hashLabel), 20, 0x404040)
+			this.interfaceHandler.drawLabels()
+			disableSwitches foreach glEnable
 		}
 	}
 }

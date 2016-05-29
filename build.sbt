@@ -6,7 +6,7 @@ val forgeVersion = "10.13.4.1614"
 
 // Compilation Options
 scalaSource in Compile := baseDirectory.value / "src"
-scalacOptions ++= Seq("-deprecation", "-encoding", "UTF8", "-feature", "-language:implicitConversions")
+scalacOptions ++= Seq("-deprecation", "-encoding", "UTF8", "-feature", "-language:implicitConversions", "-language:postfixOps")
 
 // Dependencies
 libraryDependencies ++= Seq(
