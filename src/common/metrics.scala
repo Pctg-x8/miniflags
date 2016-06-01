@@ -2,7 +2,7 @@ package com.cterm2.miniflags.common
 
 // Design Parameters
 
-object Parameters
+object Metrics
 {
 	final val Space = 0.125f
 	final val InvSpace = 1.0f - Space

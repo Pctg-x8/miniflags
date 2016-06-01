@@ -159,7 +159,7 @@ package intercommands
 				val Coordinate(x, y, z) = msg.pos
 				Option(context.getServerHandler().playerEntity.worldObj.getTileEntity(x, y, z)) match
 				{
-				case Some(tile: flag.TileData) => tile.name = msg.newName
+				case Some(tile: TileData) => tile.name = msg.newName
 				case _ => ModInstance.logger.warn("Invalid message")
 				}
 				null

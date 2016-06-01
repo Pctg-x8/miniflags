@@ -9,16 +9,16 @@ import scalaz._, Scalaz._
 object GuiHandler extends IGuiHandler
 {
 	private def getFlagTileData(world: World, x: Int, y: Int, z: Int) =
-		Option(world.getTileEntity(x, y, z)) collect { case x: flag.TileData => x }
+		Option(world.getTileEntity(x, y, z)) collect { case x: TileData => x }
 
 	override def getServerGuiElement(id: Int, player: EntityPlayer, world: World, x: Int, y: Int, z: Int) = id match
 	{
-		case ModInstance.InterfaceID => (getFlagTileData(world, x, y, z) map (new flag.FlagSettingsContainer(_))) | null
+		case ModInstance.InterfaceID => (getFlagTileData(world, x, y, z) map (new FlagSettingsContainer(_))) | null
 		case _ => null
 	}
 	override def getClientGuiElement(id: Int, player: EntityPlayer, world: World, x: Int, y: Int, z: Int) = id match
 	{
-		case ModInstance.InterfaceID => (getFlagTileData(world, x, y, z) map (new flag.FlagSettingsInterface(world.asInstanceOf[WorldClient], _))) | null
+		case ModInstance.InterfaceID => (getFlagTileData(world, x, y, z) map (new FlagSettingsInterface(world, _))) | null
 		case _ => null
 	}
 }

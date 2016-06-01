@@ -32,7 +32,7 @@ object ModInstance
 	{
 		def init()
 		{
-			render.flag.init()
+			render.init()
 		}
 	}
 	@SidedProxy(modId=ModInstance.ID, serverSide="com.cterm2.miniflags.ModInstance$ServerProxy", clientSide="com.cterm2.miniflags.ModInstance$ClientProxy")
@@ -41,7 +41,7 @@ object ModInstance
 	@Mod.EventHandler
 	def init(e: FMLInitializationEvent)
 	{
-		flag.register
+		triflag.init()
 		proxy.init()
 
 		intercommands.registerMessages()
@@ -55,5 +55,5 @@ object CreativeTab extends net.minecraft.creativetab.CreativeTabs(ModInstance.ID
 {
 	import net.minecraft.init.Blocks, net.minecraft.item.Item
 
-	override lazy val getTabIconItem = Item.getItemFromBlock(flag.Block0)
+	override lazy val getTabIconItem = Item.getItemFromBlock(triflag.Block0)
 }

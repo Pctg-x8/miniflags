@@ -1,22 +1,26 @@
-package com.cterm2.miniflags.triflag
+package com.cterm2.miniflags
 
-// Graphics Interface of Triangle Flag
-
-import net.minecraft.client.gui._
-import net.minecraft.client.gui.inventory.GuiContainer
 import net.minecraft.world.World
-import net.minecraft.inventory.Container
-import net.minecraft.entity.player.EntityPlayer
+import net.minecraft.inventory._
+import net.minecraft.client.gui._
+import net.minecraft.util._
+import net.minecraft.client.gui.inventory.GuiContainer
+import cpw.mods.fml.relauncher.{SideOnly, Side}
 
+// Common Conainer for Flag Settings
 final class FlagSettingsContainer(val tile: TileData) extends Container
 {
-	override def canInteractWith(player: EntityPlayer) =
-		player.getDistanceSq(tile.xCoord + 0.5d, tile.yCoord + 0.5d, tile.zCoord + 0.5d) <= 64.0d
+	import net.minecraft.entity.player.EntityPlayer
+
+	override def canInteractWith(player: EntityPlayer) = player.getDistanceSq(tile.xCoord + 0.5d, tile.yCoord + 0.5d, tile.zCoord + 0.5d) <= 64.0d
 }
-// Ref: GuiRepair(Interface of Anvil)
+
+// Common Interface of Flag Settings
 @SideOnly(Side.CLIENT)
 final class FlagSettingsInterface(val world: World, val tile: TileData) extends GuiContainer(new FlagSettingsContainer(tile))
 { CommonInterface =>
+	import com.cterm2.tetra.LocalTranslationUtils._
+	import collection.JavaConversions._
 	import org.lwjgl.input.Keyboard
 	import org.lwjgl.opengl.GL11._
 
@@ -32,7 +36,7 @@ final class FlagSettingsInterface(val world: World, val tile: TileData) extends 
 
 	private trait IInterfacePage
 	{
-		val titleLocalized = ""
+		val titleLocalized: String
 
 		def onKeyType(chr: Char, rep: Int): Boolean
 		def updateScreen()
@@ -46,12 +50,11 @@ final class FlagSettingsInterface(val world: World, val tile: TileData) extends 
 		override val titleLocalized = t"gui.labels.UnlinkedFlags"
 		private val linkTargetInputField =
 		{
-			val o = new GuiTextField(CommonInterface.fontRendererObj, CommonInterface.guiLeft + 10, CommonInterface.guiTop + 58, CommonInterface.xSize - 39, 12)
+			val o = new GuiTextField(CommonInterface.fontRendererObj, CommonInterface.guiLeft + 10, CommonInterface.guiTop + 50, CommonInterface.xSize - 39, 12)
 			o.setEnableBackgroundDrawing(false)
 			o.setMaxStringLength(20)
 			o
 		}
-		private var overingLinkButton = false
 
 		def onKeyType(chr: Char, rep: Int) = this.linkTargetInputField.textboxKeyTyped(chr, rep)
 		def updateScreen() { this.linkTargetInputField.updateCursorCounter() }
@@ -59,14 +62,9 @@ final class FlagSettingsInterface(val world: World, val tile: TileData) extends 
 		def drawControls(mx: Int, my: Int)
 		{
 			this.linkTargetInputField.drawTextBox()
-			glColor4f(1.0f, 1.0f, 1.0f, 1.0f)
 			CommonInterface.mc.renderEngine bindTexture CommonInterface.resource
-			this.overingLinkButton =
-				((CommonInterface.guiLeft + CommonInterface.xSize - 25 + 1) to (CommonInterface.guiLeft + CommonInterface.xSize - 25 + 17) contains mx) &&
-				((CommonInterface.guiTop + 54 + 1) to (CommonInterface.guiTop + 54 + 16) contains my)
-			CommonInterface.drawTexturedModalRect(CommonInterface.guiLeft + CommonInterface.xSize - 25, CommonInterface.guiTop + 54,
-				CommonInterface.xSize + (if(this.overingLinkButton) 17 else 0), 0, 17, 16)
-			if(this.overingLinkButton) CommonInterface.drawHoveringText(List("Link!!"), mx, my, CommonInterface.fontRendererObj)
+
+			glColor4f(1.0f, 1.0f, 1.0f, 1.0f)
 		}
 		def drawLabels()
 		{
@@ -112,7 +110,6 @@ final class FlagSettingsInterface(val world: World, val tile: TileData) extends 
 	}
 	override def keyTyped(chr: Char, rep: Int)
 	{
-		// Dispatching Key Event
 		if(this.nameInputField.textboxKeyTyped(chr, rep))
 		{
 			intercommands.UpdateFlagName(tile.coord, this.nameInputField.getText).dispatchToServer()
@@ -131,21 +128,21 @@ final class FlagSettingsInterface(val world: World, val tile: TileData) extends 
 		this.nameInputField.mouseClicked(x, y, b)
 		this.interfaceHandler.onMouseClicked(x, y, b)
 	}
-	override def drawScreen(p1: Int, p2: Int, p3: Float)
+	override def drawScreen(mx: Int, my: Int, p3: Float)
 	{
-		super.drawScreen(p1, p2, p3)
+		super.drawScreen(mx, my, p3)
 		Seq(GL_LIGHTING, GL_BLEND) foreach glDisable
 		this.nameInputField.drawTextBox()
-		this.interfaceHandler.drawControls(p1, p2)
+		this.interfaceHandler.drawControls(mx, my)
 		Seq(GL_LIGHTING, GL_BLEND) foreach glEnable
 	}
 
 	override def drawGuiContainerBackgroundLayer(p1: Float, p2: Int, p3: Int)
 	{
-		this.mc.renderEngine bindTexture resource
+		this.mc.renderEngine bindTexture this.resource
 		this.drawTexturedModalRect(this.guiLeft, this.guiTop, 0, 0, this.xSize, this.ySize)
 	}
-	override def drawGuiContainerForegroundLayer(p1: Int, p2: Int)
+	override def drawGuiContainerForegroundLayer(mx: Int, my: Int)
 	{
 		val headerText = this.interfaceHandler.titleLocalized
 		val headerWidth = this.fontRendererObj getStringWidth headerText

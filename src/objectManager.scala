@@ -90,12 +90,12 @@ final class ObjectManager(id: String) extends WorldSavedData(id)
 	private def links_=(list: Seq[Link]) { this._links = list; this.markDirty() }
 
 	def register(x: Int, y: Int, z: Int) { this.terminalCoordinates = this.terminalCoordinates :+ Coordinate(x, y, z) }
-	def unregister(dim: Int, x: Int, y: Int, z: Int)
+	def unregister(x: Int, y: Int, z: Int)
 	{
 		val crd = Coordinate(x, y, z)
 		this.terminalCoordinates = this.terminalCoordinates filterNot (_ == crd)
 		this.links = this.links filterNot { case Link(cs, cd) => cs == crd || cd == crd }
-		intercommands.UnregisterTerm(crd) broadcastIn dim
+		intercommands.UnregisterTerm(crd) broadcastIn worldObj.provider.dimensionId
 	}
 	def link(player: EntityPlayer, sx: Int, sy: Int, sz: Int, dx: Int, dy: Int, dz: Int)
 	{
@@ -106,7 +106,7 @@ final class ObjectManager(id: String) extends WorldSavedData(id)
 			this.links = this.links :+ Link(src, dst)
 			intercommands.NewLink(src, dst) broadcastIn player.dimension
 			player.addChatComponentMessage(new ChatComponentText(s"Successfully linked from ($sx, $sy, $sz) to ($dx, $dy, $dz)"))
-			flag.playLinkedSound(this.worldObj, sx, sy, sz)
+			common.playLinkedSound(this.worldObj, sx, sy, sz)
 		}
 		else ModInstance.logger.warn(s"Invalid Linking from ($sx, $sy, $sz) to ($dx, $dy, $dz)")
 	}
