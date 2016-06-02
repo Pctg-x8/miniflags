@@ -1,9 +1,11 @@
 package com.cterm2.miniflags
 
+import net.minecraft.item.Item
 import net.minecraft.tileentity.TileEntity
 import net.minecraft.nbt._
 import net.minecraft.network.play.server.S35PacketUpdateTileEntity
 import net.minecraft.network.NetworkManager
+import net.minecraft.world.World
 
 // Common TileData with Flag Name
 final class TileData extends TileEntity
@@ -13,7 +15,7 @@ final class TileData extends TileEntity
 
 	// Internal Data and Read-only synthetic values
 	var _name: Option[String] = None
-	def hashID = ((this.yCoord.toLong & 0xff) << 56) | ((this.xCoord.toLong & 0xfffffff) << 28) | (this.zCoord.toLong & 0xfffffff)
+	def hashID = TileData.makeID(this.xCoord, this.yCoord, this.zCoord)
 	def coord = Coordinate(this.xCoord, this.yCoord, this.zCoord)
 
 	// Name Utilies
@@ -23,7 +25,11 @@ final class TileData extends TileEntity
 		this._name = Some(str); this.markDirty(); this.worldObj.markBlockForUpdate(this.xCoord, this.yCoord, this.zCoord)
 	}
 	def hasCustomName = this.name.isDefined
-	def nameOrDefaultLocalized = this.name | this.worldObj.getBlock(this.xCoord, this.yCoord, this.zCoord).getLocalizedName()
+	def nameOrDefaultLocalized = this.name |
+	{
+		val block = this.worldObj.getBlock(this.xCoord, this.yCoord, this.zCoord).asInstanceOf[BlockFlagBase]
+		block.getLocalizedNameFromMetaValue(this.worldObj.getBlockMetadata(this.xCoord, this.yCoord, this.zCoord))
+	}
 
 	// Data Synchronizations
 	override def writeToNBT(tag: NBTTagCompound)
@@ -48,4 +54,13 @@ final class TileData extends TileEntity
 			this._name = x[String]("CustomName")
 		}
 	}
+}
+object TileData
+{
+	// Utilities for TileData
+	def makeID(x: Int, y: Int, z: Int) = ((y.toLong & 0xff) << 56) | ((x.toLong & 0xfffffff) << 28) | (z.toLong & 0xfffffff)
+	def xCoordFromID(id: Long) = toIntWithSignificantExtension((id >> 28).toInt & 0xfffffff)
+	def yCoordFromID(id: Long) = ((id >> 56).toInt & 0xff).toInt
+	def zCoordFromID(id: Long) = toIntWithSignificantExtension(id.toInt & 0xfffffff)
+	private def toIntWithSignificantExtension(id: Int) = if((id & 0x8000000) != 0) -(id & 0x7ffffff) else id
 }

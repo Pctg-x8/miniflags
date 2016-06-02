@@ -7,6 +7,7 @@ import cpw.mods.fml.common.event._
 import cpw.mods.fml.relauncher._
 import cpw.mods.fml.common.network.NetworkRegistry
 import net.minecraftforge.common.MinecraftForge
+import com.cterm2.tetra.ContentRegistry
 
 @Mod(modid=ModInstance.ID, name=ModInstance.Name, version=ModInstance.VersionStr, modLanguage="scala")
 object ModInstance
@@ -42,7 +43,9 @@ object ModInstance
 	def init(e: FMLInitializationEvent)
 	{
 		triflag.init()
+		squflag.init()
 		proxy.init()
+		ContentRegistry register classOf[TileData] as "FlagTileData"
 
 		intercommands.registerMessages()
 		MinecraftForge.EVENT_BUS.register(WorldEvents)

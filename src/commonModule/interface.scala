@@ -23,6 +23,8 @@ final class FlagSettingsInterface(val world: World, val tile: TileData) extends 
 	import collection.JavaConversions._
 	import org.lwjgl.input.Keyboard
 	import org.lwjgl.opengl.GL11._
+	import scalaz._, Scalaz._
+	import net.minecraft.client.renderer.Tessellator
 
 	// Interface Commons
 	private val resource = new ResourceLocation(ModInstance.ID, "guiBase.png")
@@ -50,21 +52,76 @@ final class FlagSettingsInterface(val world: World, val tile: TileData) extends 
 		override val titleLocalized = t"gui.labels.UnlinkedFlags"
 		private val linkTargetInputField =
 		{
-			val o = new GuiTextField(CommonInterface.fontRendererObj, CommonInterface.guiLeft + 10, CommonInterface.guiTop + 50, CommonInterface.xSize - 39, 12)
+			val o = new GuiTextField(CommonInterface.fontRendererObj, CommonInterface.guiLeft + 10, CommonInterface.guiTop + 58, CommonInterface.xSize - 20, 12)
 			o.setEnableBackgroundDrawing(false)
-			o.setMaxStringLength(20)
+			o.setMaxStringLength(40)
 			o
 		}
+		var idterm: Option[Term] = None
 
-		def onKeyType(chr: Char, rep: Int) = this.linkTargetInputField.textboxKeyTyped(chr, rep)
+		def onKeyType(chr: Char, rep: Int) =
+		{
+			if(this.linkTargetInputField.textboxKeyTyped(chr, rep))
+			{
+				this.idterm = (Option(this.linkTargetInputField.getText) collect { case x if x.length >= 1 => x }) >>=
+				{
+					case x if '0' to '9' contains x.head => ClientLinkManager.getTermFromIDStr(world, x)
+					case _ => None
+				}
+				true
+			}
+			else false
+		}
 		def updateScreen() { this.linkTargetInputField.updateCursorCounter() }
 		def onMouseClicked(x: Int, y: Int, button: Int) { this.linkTargetInputField.mouseClicked(x, y, button) }
 		def drawControls(mx: Int, my: Int)
 		{
 			this.linkTargetInputField.drawTextBox()
-			CommonInterface.mc.renderEngine bindTexture CommonInterface.resource
 
-			glColor4f(1.0f, 1.0f, 1.0f, 1.0f)
+			val tess = Tessellator.instance
+			def addQuadVertices(x1: Int, y1: Int, x2: Int, y2: Int)
+			{
+				tess.addVertex(x1, y1, 0.0d); tess.addVertex(x1, y2, 0.0d); tess.addVertex(x2, y2, 0.0d); tess.addVertex(x2, y1, 0.0d)
+			}
+			def addQuadVerticesWithUV(xu: ((Int, Int), (Int, Int)), yv: ((Int, Int), (Int, Int)))
+			{
+				val ((px1, u1), (px2, u2)) = xu
+				val ((py1, v1), (py2, v2)) = yv
+
+				tess.addVertexWithUV(px1, py1, 0.0d, u1 / 256.0d, v1 / 256.0d)
+				tess.addVertexWithUV(px1, py2, 0.0d, u1 / 256.0d, v2 / 256.0d)
+				tess.addVertexWithUV(px2, py2, 0.0d, u2 / 256.0d, v2 / 256.0d)
+				tess.addVertexWithUV(px2, py1, 0.0d, u2 / 256.0d, v1 / 256.0d)
+			}
+
+			glDisable(GL_TEXTURE_2D)
+			glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+			glPushMatrix()
+			glTranslatef(CommonInterface.guiLeft, CommonInterface.guiTop, 0.0f)
+			// Render List Element(By ID)
+			this.idterm foreach { term =>
+				val col = term.color
+				tess.startDrawingQuads()
+				tess.setColorRGBA_F(col.r, col.g, col.b, 0.625f)
+				addQuadVertices(9, 74, CommonInterface.xSize - 9, 74 + 20)
+				tess.setColorRGBA_F(1.0f, 1.0f, 1.0f, 0.25f)
+				addQuadVertices(9, 74, CommonInterface.xSize - 9, 74 + 20)
+				tess.setColorRGBA_F(0.0f, 0.0f, 0.0f, 0.125f)
+				addQuadVertices(9, 74 + 10, CommonInterface.xSize - 9, 74 + 20)
+				tess.draw()
+				glEnable(GL_TEXTURE_2D)
+				CommonInterface.fontRendererObj.drawString(term.name | "unnamed", 12, 75, 0x404040)
+				CommonInterface.fontRendererObj.drawString(s"(${term.pos.x}, ${term.pos.y}, ${term.pos.z})", 12, 75 + 10, 0x404040)
+				CommonInterface.mc.renderEngine bindTexture CommonInterface.resource
+				glColor4f(1.0f, 1.0f, 1.0f, 1.0f)
+				tess.startDrawingQuads()
+				addQuadVerticesWithUV((CommonInterface.xSize - 9 - 2 - 17, CommonInterface.xSize) -> (CommonInterface.xSize - 9 - 2, CommonInterface.xSize + 17),
+					(74 + 2, 0) -> (74 + 2 + 16, 16))
+				tess.draw()
+				glDisable(GL_TEXTURE_2D)
+			}
+			glPopMatrix()
+			glDisable(GL_BLEND); glEnable(GL_TEXTURE_2D)
 		}
 		def drawLabels()
 		{

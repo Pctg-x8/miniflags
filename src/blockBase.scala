@@ -14,11 +14,12 @@ import scalaz._, Scalaz._
 import com.cterm2.miniflags.common.ItemKeys
 import com.cterm2.tetra.ActiveNBTRecord._
 import common._
+import com.cterm2.tetra.LocalTranslationUtils._
 
-// Containment Object Representation
-final class BlockSummoner(val block: FlagBlockBase) extends ItemBlock(block)
+// Containment Object
+abstract class ItemFlagBase(block: Block) extends ItemBlock(block)
 {
-	import BlockSummoner._
+	import ItemFlagBase._
 
 	this.setMaxStackSize(1).setHasSubtypes(true).setMaxDamage(0)
 
@@ -33,10 +34,14 @@ final class BlockSummoner(val block: FlagBlockBase) extends ItemBlock(block)
 		stack
 	}
 
+	val baseName: String = ""
+	final override def getUnlocalizedName(stack: ItemStack) = baseName + "." + ItemDye.field_150923_a(BlockColored.func_150031_c(stack.getItemDamage))
+	final def getLocalizedNameFromMetaValue(meta: Int) = t"${baseName}.${ItemDye.field_150923_a(BlockColored.func_150031_c(meta))}"
+
 	// Custom Information Line(LinkDestination)
 	override def addInformation(stack: ItemStack, player: EntityPlayer, lines: java.util.List[_], b: Boolean)
 	{
-		(BlockSummoner.retrieveReservedLinkingDestinationCoordinate(stack) >>=
+		(ItemFlagBase.retrieveReservedLinkingDestinationCoordinate(stack) >>=
 		{
 			case List(dx, dy, dz) => Some((dx, dy, dz))
 			case _ => None
@@ -47,7 +52,7 @@ final class BlockSummoner(val block: FlagBlockBase) extends ItemBlock(block)
 	private def onPlacingAction(stack: ItemStack, player: EntityPlayer, world: World, hitX: Float, hitY: Float, hitZ: Float)(x: Int, y: Int, z: Int, side: Int) =
 	{
 		// Block Direction by RotationYaw
-		val blk = this.block.blockDirectionProvider.getBlockByDirection(MathHelper.floor_double((player.rotationYaw / 90.0f).toDouble + 0.5d) & 3)
+		val blk = this.getBlockByDirection(MathHelper.floor_double((player.rotationYaw / 90.0f).toDouble + 0.5d) & 3)
 
 		// validation
 		val stackHasItem = stack.stackSize > 0
@@ -59,12 +64,15 @@ final class BlockSummoner(val block: FlagBlockBase) extends ItemBlock(block)
 		{
 			val meta = this.getMetadata(stack.getItemDamage)
 			val newMeta = blk.onBlockPlaced(world, x, y, z, side, hitX, hitY, hitZ, meta)
-			BlockSummoner.placeBlockAt(world, x, y, z, blk, newMeta, player, stack)
+			ItemFlagBase.placeBlockAt(world, x, y, z, blk, newMeta, player, stack)
 		}
 		else false
 	}
+
+	// ByDirection Block Provider
+	protected def getBlockByDirection(dir: Int): BlockFlagBase
 }
-object BlockSummoner
+object ItemFlagBase
 {
 	// Helper Routines
 
@@ -98,7 +106,7 @@ object BlockSummoner
 	// called in onPlaceBlock
 	private def postPlaceAction(world: World, x: Int, y: Int, z: Int, stack: ItemStack, player: EntityPlayer)
 	{
-		ObjectManager.instanceForWorld(world) foreach (_.register(x, y, z))
+		ObjectManager.instanceForWorld(world) foreach (_.register(x, y, z, EnumColor fromValue stack.getItemDamage))
 		if(stack.hasDisplayName) Option(world.getTileEntity(x, y, z)) foreach { case x: TileData => x.name = stack.getDisplayName }
 		retrieveReservedLinkingDestinationCoordinate(stack) foreach
 		{
@@ -138,33 +146,30 @@ object BlockSummoner
 	}
 }
 
-// Delegated class that provides block by direction
-trait IDirectionProvider
-{
-	def getBlockByDirection(dir: Int): FlagBlockBase
-}
-
 // Base Class of All Flag Blocks
-abstract class FlagBlockBase(val blockDirectionProvider: IDirectionProvider) extends BlockContainer(Material.rock)
+abstract class BlockFlagBase extends BlockContainer(Material.rock)
 {
 	this.setHardness(0)
 	this.setBlockBounds(Metrics.Space, 0.0f, Metrics.Space, Metrics.InvSpace, 1.0f, Metrics.InvSpace)
 
 	// Block Properties
-	override val canSilkHarvest = false
-	override def getHarvestLevel(meta: Int) = 0
-	override def getHarvestTool(meta: Int) = null
-	override val getMobilityFlag = 2		/* Cannot move by anything */
+	final override val canSilkHarvest = false
+	final override def getHarvestLevel(meta: Int) = 0
+	final override def getHarvestTool(meta: Int) = null
+	final override val getMobilityFlag = 2		/* Cannot move by anything */
 
 	// Rendering Properties
-	override val isOpaqueCube = false
-	override val isNormalCube = false
-	override val renderAsNormalBlock = false
-	override def getIcon(side: Int, meta: Int) = Blocks.planks.getIcon(side, 0)
+	final override val isOpaqueCube = false
+	final override val isNormalCube = false
+	final override val renderAsNormalBlock = false
+	final override def getIcon(side: Int, meta: Int) = Blocks.planks.getIcon(side, 0)
+
+	val baseName: String = ""
+	final def getLocalizedNameFromMetaValue(meta: Int) = t"${baseName}.${ItemDye.field_150923_a(BlockColored.func_150031_c(meta))}.name"
 
 	// getCollisionBoundingBoxFromPool: Collision Box for Visibility Testing
 	// Collision Test against Entities
-	override def addCollisionBoxesToList(world: World, x: Int, y: Int, z: Int, mask: AxisAlignedBB, boxes: java.util.List[_], entity: Entity)
+	final override def addCollisionBoxesToList(world: World, x: Int, y: Int, z: Int, mask: AxisAlignedBB, boxes: java.util.List[_], entity: Entity)
 	{
 		val boxList = boxes.asInstanceOf[java.util.List[AxisAlignedBB]]
 
@@ -181,12 +186,12 @@ abstract class FlagBlockBase(val blockDirectionProvider: IDirectionProvider) ext
 	{
 		if(!world.isRemote)
 		{
-			def isBlockSummonerItem(s: ItemStack) = Option(s.getItem) collect { case x: BlockSummoner => x } isDefined
+			def isBlockSummonerItem(s: ItemStack) = Option(s.getItem) collect { case x: ItemFlagBase => x } isDefined
 			val activateWith = Option(player.inventory.getCurrentItem)
 
 			activateWith match
 			{
-			case Some(t: ItemStack) if isBlockSummonerItem(t) => BlockSummoner.reserveLinkingDestinationCoordinate(world, t, x, y, z, player)
+			case Some(t: ItemStack) if isBlockSummonerItem(t) => ItemFlagBase.reserveLinkingDestinationCoordinate(world, t, x, y, z, player)
 			case _ => player.openGui(ModInstance, ModInstance.InterfaceID, world, x, y, z)
 			}
 			true

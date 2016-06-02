@@ -1,0 +1,41 @@
+# Interface Labels
+gui.labels.UnlinkedFlags=未リンクの旗
+gui.labels.LinkedFlags=リンク済みの旗
+gui.labels.FlagName=名前:
+gui.labels.FlagHash=ID
+gui.labels.LinkTo=リンク先:
+
+# Tile Names(Triangle Flag)
+FlagBlock.tri.white.name=三角旗(白)
+FlagBlock.tri.orange.name=三角旗(オレンジ)
+FlagBlock.tri.magenta.name=三角旗(マゼンタ)
+FlagBlock.tri.lightBlue.name=三角旗(明るい青)
+FlagBlock.tri.yellow.name=三角旗(黄)
+FlagBlock.tri.lime.name=三角旗(ライム)
+FlagBlock.tri.pink.name=三角旗(桃)
+FlagBlock.tri.gray.name=三角旗(灰)
+FlagBlock.tri.silver.name=三角旗(銀)
+FlagBlock.tri.cyan.name=三角旗(シアン)
+FlagBlock.tri.purple.name=三角旗(紫)
+FlagBlock.tri.blue.name=三角旗(青)
+FlagBlock.tri.brown.name=三角旗(茶)
+FlagBlock.tri.green.name=三角旗(緑)
+FlagBlock.tri.red.name=三角旗(赤)
+FlagBlock.tri.black.name=三角旗(黒)
+# Tile Names(Square Flag)
+FlagBlock.squ.white.name=四角旗(白)
+FlagBlock.squ.orange.name=四角旗(オレンジ)
+FlagBlock.squ.magenta.name=四角旗(マゼンタ)
+FlagBlock.squ.lightBlue.name=四角旗(明るい青)
+FlagBlock.squ.yellow.name=四角旗(黄)
+FlagBlock.squ.lime.name=四角旗(ライム)
+FlagBlock.squ.pink.name=四角旗(桃)
+FlagBlock.squ.gray.name=四角旗(灰)
+FlagBlock.squ.silver.name=四角旗(銀)
+FlagBlock.squ.cyan.name=四角旗(シアン)
+FlagBlock.squ.purple.name=四角旗(紫)
+FlagBlock.squ.blue.name=四角旗(青)
+FlagBlock.squ.brown.name=四角旗(茶)
+FlagBlock.squ.green.name=四角旗(緑)
+FlagBlock.squ.red.name=四角旗(赤)
+FlagBlock.squ.black.name=四角旗(黒)

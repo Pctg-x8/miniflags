@@ -7,22 +7,22 @@ import net.minecraft.client.renderer._
 import com.cterm2.tetra.StaticMeshData._
 import com.cterm2.miniflags.common.Metrics
 
-// Triangle Flag Block Renderer
-object TriBlockRenderer extends cpw.mods.fml.client.registry.ISimpleBlockRenderingHandler
+// Square Flag Block Renderer
+object SquareBlockRenderer extends cpw.mods.fml.client.registry.ISimpleBlockRenderingHandler
 {
-	import com.cterm2.miniflags.triflag._
+	import com.cterm2.miniflags.squflag._
 	import scalaz._, Scalaz._, helper._
 
 	val meshData: Block => StaticMesh = Memo.mutableHashMapMemo
 	{
-		case Block0 => EmptyStaticMesh.renderFlagPart(FlagPartNormal)
-		case Block90 => EmptyStaticMesh.renderFlagPart(FlagPartRot90)
-		case Block180 => EmptyStaticMesh.renderFlagPart(FlagPartInv)
-		case Block270 => EmptyStaticMesh.renderFlagPart(FlagPartRot270)
+		case Block0 => EmptyStaticMesh.renderFlagPartSq(FlagPartNormal)
+		case Block90 => EmptyStaticMesh.renderFlagPartSq(FlagPartRot90)
+		case Block180 => EmptyStaticMesh.renderFlagPartSq(FlagPartInv)
+		case Block270 => EmptyStaticMesh.renderFlagPartSq(FlagPartRot270)
 	}
 
-	override def getRenderId() = TriRenderID
-	override def shouldRender3DInInventory(model: Int) = true
+	override def getRenderId() = SquareRenderID
+	override def shouldRender3DInInventory(mode: Int) = true
 	override def renderInventoryBlock(block: Block, meta: Int, model: Int, renderer: RenderBlocks)
 	{
 		import org.lwjgl.opengl.GL11._
@@ -56,7 +56,7 @@ object TriBlockRenderer extends cpw.mods.fml.client.registry.ISimpleBlockRenderi
 			renderer.renderFaceYPos(block, x, y, z, Blocks.planks.getBlockTextureFromSide(1))
 		}
 
-		// Render static meshes
+		// Render Static Meshes
 		meshBase(false).render(world, Blocks.stone, 0, x, y, z, renderer, bLight, xLight, zLight, r, g, b)
 		meshPole(false).render(world, Blocks.planks, 0, x, y, z, renderer, bLight, xLight, zLight, r, g, b)
 		meshData(block).render(world, Blocks.wool, world.getBlockMetadata(x, y, z), x, y, z, renderer, bLight, xLight, zLight, r, g, b)

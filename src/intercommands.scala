@@ -6,6 +6,7 @@ import cpw.mods.fml.common.network.ByteBufUtils._
 import net.minecraftforge.common.DimensionManager
 import net.minecraft.entity.player.EntityPlayerMP
 import org.apache.commons.io.Charsets
+import common.EnumColor
 
 // Common BufferUtils
 package object BufferUtils
@@ -14,6 +15,8 @@ package object BufferUtils
 	{
 		def readInt() = readVarInt(buffer, 5)
 		def writeInt(v: Int) = { writeVarInt(buffer, v, 5); this }
+		def readShort() = readVarShort(buffer)
+		def writeShort(v: Int) = { writeVarShort(buffer, v); this }
 		def readCoordinate() =
 		{
 			val x = readInt()
@@ -34,6 +37,44 @@ package object BufferUtils
 
 package intercommands
 {
+	// The message sent when a new term is registered
+	object NewTerm
+	{
+		final class Message(var pos: Coordinate, var color: EnumColor.Type) extends IMessage
+		{
+			import BufferUtils._
+
+			def this() = this(Coordinate(0, 0, 0), EnumColor.White)
+			override def fromBytes(buffer: ByteBuf)
+			{
+				this.pos = buffer.readCoordinate()
+				this.color = EnumColor fromValue buffer.readShort()
+			}
+			override def toBytes(buffer: ByteBuf)
+			{
+				buffer.writeCoordinate(this.pos).writeShort(color.value)
+			}
+
+			def dispatchTo(player: EntityPlayerMP)
+			{
+				ModInstance.network.sendTo(this, player)
+			}
+			def broadcastIn(dim: Int)
+			{
+				ModInstance.network.sendToDimension(this, dim)
+			}
+		}
+		final class Handler extends IMessageHandler[Message, IMessage]
+		{
+			override def onMessage(msg: Message, context: MessageContext) =
+			{
+				ClientLinkManager.addTerm(msg.pos, msg.color)
+				null
+			}
+		}
+
+		def apply(pos: Coordinate, color: EnumColor.Type) = new Message(pos, color)
+	}
 	// The message sent when a new link is established
 	object NewLink
 	{
@@ -151,17 +192,24 @@ package intercommands
 			{
 				ModInstance.network.sendToServer(this)
 			}
+			def broadcastIn(dim: Int) { ModInstance.network.sendToDimension(this, dim) }
+			def dispatchTo(player: EntityPlayerMP) { ModInstance.network.sendTo(this, player) }
 		}
 		final class Handler extends IMessageHandler[Message, IMessage]
 		{
 			override def onMessage(msg: Message, context: MessageContext) =
 			{
-				val Coordinate(x, y, z) = msg.pos
-				Option(context.getServerHandler().playerEntity.worldObj.getTileEntity(x, y, z)) match
-				{
-				case Some(tile: TileData) => tile.name = msg.newName
-				case _ => ModInstance.logger.warn("Invalid message")
-				}
+				// Server Side Update and Reflect to All
+				ObjectManager.instanceForWorld(context.getServerHandler.playerEntity.worldObj) foreach (_.updateName(msg.pos, msg.newName))
+				UpdateFlagName(msg.pos, msg.newName) broadcastIn context.getServerHandler.playerEntity.dimension
+				null
+			}
+		}
+		final class ClientHandler extends IMessageHandler[Message, IMessage]
+		{
+			override def onMessage(msg: Message, context: MessageContext) =
+			{
+				ClientLinkManager.updateName(msg.pos, msg.newName)
 				null
 			}
 		}
@@ -180,5 +228,7 @@ package object intercommands
 		ModInstance.network.registerMessage(classOf[UnregisterTerm.Handler], classOf[UnregisterTerm.Message], 2, Side.CLIENT)
 		ModInstance.network.registerMessage(classOf[InitializeDimension.Handler], classOf[InitializeDimension.Message], 3, Side.CLIENT)
 		ModInstance.network.registerMessage(classOf[UpdateFlagName.Handler], classOf[UpdateFlagName.Message], 4, Side.SERVER)
+		ModInstance.network.registerMessage(classOf[UpdateFlagName.ClientHandler], classOf[UpdateFlagName.Message], 5, Side.CLIENT)
+		ModInstance.network.registerMessage(classOf[NewTerm.Handler], classOf[NewTerm.Message], 6, Side.CLIENT)
 	}
 }
